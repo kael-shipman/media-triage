@@ -95,9 +95,18 @@ nothing when they match.
 
 **The sync stream refuses API keys.** `sync.service.ts` throws "Sync endpoints cannot be used with API keys", so the
 daemon needs a login session:
-- **Logging in:** `media-triage login <account>` asks for the account's password once, logs in, and keeps only the
-  session token, in the state folder, readable only by its owner.
-- **Revoking:** the session shows in the account's **Authorized devices**, and revoking it there cuts the daemon off.
+- **Logging in:** `media-triage login <account>` asks for the account's password once (without echoing it, or as the
+  first line of stdin when that isn't a terminal), logs in (`POST /api/auth/login`), and checks the session with
+  `GET /api/users/me`.
+  - **It keeps only the session,** never the password: `<state>/sessions/<account>`, a JSON file with the token and the
+    user ID and email it belongs to. The file is mode 600 in a mode 700 folder. A session file that others can read is
+    refused.
+  - **Logging in again** replaces the session and ends the old one (`POST /api/auth/logout`), so sessions don't pile
+    up.
+- **Revoking:** the session shows in the account's **Authorized devices** as `media-triage` on the daemon's host name,
+  and revoking it there cuts the daemon off. Every request sends those names (`devicemodel` and `devicetype` headers),
+  since Immich rewrites a session's device from its requests about once an hour (`auth.service.ts`,
+  `validateSession`).
 - **Access:** a session has full access to its account, more than an API key with chosen permissions. That's the
   price of the sync stream. Creating libraries for other accounts needs the admin's session (section 8).
 - **Expiry:** Immich deletes sessions unused for 90 days (`session.repository.ts`, `cleanup`). Using one refreshes it
@@ -305,6 +314,8 @@ or a library.
 - **Layout:**
   - `src/main.ts`: the command line;
   - `src/core/`: the pure rules, without I/O;
+  - `src/immich/`: the Immich client: one `ImmichClient` per account's session, wrapping `@immich/sdk` (pinned to the
+    server's version), plus the sessions and `login`;
   - each module's tests sit beside it (`*.test.ts`).
   - `test/immich/`: a development Immich for the integration tests (`compose.yml`, started and stopped by `dev.ts`),
     and what the tests share (`harness.ts`). Tests that need it are skipped unless `MEDIA_TRIAGE_IMMICH_TESTS=1`;

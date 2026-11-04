@@ -6,8 +6,12 @@ import { type Config, ConfigError, loadConfig } from "./config.ts";
 import { runDaemon } from "./daemon.ts";
 import { formatDuration } from "./duration.ts";
 import { EXIT } from "./exit.ts";
+import { ImmichError } from "./immich/client.ts";
+import { findAccount, loginAccount } from "./immich/login.ts";
+import { SessionError } from "./immich/sessions.ts";
 import { LEVELS, type Level, log, setLogLevel } from "./log.ts";
 import { defaultConfigPath } from "./paths.ts";
+import { PromptCancelled, readPassword } from "./prompt.ts";
 import { UpgradeError, upgrade } from "./upgrade.ts";
 import { IS_COMPILED, VERSION } from "./version.ts";
 
@@ -17,12 +21,13 @@ Keeps a photo inbox, an archive, Immich and Darktable in step, and files triaged
 Usage: media-triage <command> [options]
 
 Commands:
-  run        Run the daemon
-  init       Write a starter configuration, unless there's one already
-  config     Check the configuration, and print it with the defaults filled in
-  upgrade    Upgrade to the newest release the configuration's [upgrade] track allows
-  version    Print the version
-  help       Print this help
+  run              Run the daemon
+  login ACCOUNT    Log an Immich account in, with its password, and keep the session
+  init             Write a starter configuration, unless there's one already
+  config           Check the configuration, and print it with the defaults filled in
+  upgrade          Upgrade to the newest release the configuration's [upgrade] track allows
+  version          Print the version
+  help             Print this help
 
 Options:
   --config FILE      The configuration file (default: ${defaultConfigPath()})
@@ -43,9 +48,13 @@ const OPTIONS = {
   version: { type: "boolean" },
 } as const;
 
+/** Which arguments each command takes. */
+const COMMAND_ARGUMENTS: Record<string, readonly string[]> = { login: ["ACCOUNT"] };
+
 /** Which options each command accepts, besides --config, --log-level and --help. */
 const COMMAND_OPTIONS: Record<string, readonly string[]> = {
   run: ["dry-run"],
+  login: [],
   init: [],
   config: [],
   upgrade: ["check", "to"],
@@ -63,9 +72,16 @@ export async function main(argv: string[]): Promise<number> {
   const { values, positionals } = parsed;
 
   if (values.version) return printVersion();
-  const command = values.help ? "help" : (positionals[0] ?? "help");
+  if (values.help) {
+    console.log(HELP);
+    return EXIT.ok;
+  }
+  const command = positionals[0] ?? "help";
   if (!(command in COMMAND_OPTIONS)) return usage(`Unknown command: ${command}`);
-  if (positionals.length > 1) return usage(`Unexpected argument: ${positionals[1]}`);
+  const expected = COMMAND_ARGUMENTS[command] ?? [];
+  const args = positionals.slice(1);
+  if (args.length > expected.length) return usage(`Unexpected argument: ${args[expected.length]}`);
+  if (args.length < expected.length) return usage(`${command} needs ${expected.slice(args.length).join(" and ")}`);
   for (const option of ["dry-run", "check", "to"] as const) {
     if (values[option] !== undefined && !COMMAND_OPTIONS[command]!.includes(option)) {
       return usage(`--${option} doesn't apply to ${command}`);
@@ -92,6 +108,8 @@ export async function main(argv: string[]): Promise<number> {
         return showConfig(loadConfig(configFile));
       case "upgrade":
         return await upgradeNow(loadConfig(configFile, { optional: true }), { check: values.check ?? false, to: values.to });
+      case "login":
+        return await loginNow(loadConfig(configFile), args[0]!);
       case "run": {
         const config = loadConfig(configFile);
         if (!logLevel) setLogLevel(config.log.level);
@@ -99,7 +117,8 @@ export async function main(argv: string[]): Promise<number> {
       }
     }
   } catch (error) {
-    if (error instanceof ConfigError || error instanceof UpgradeError) {
+    if (error instanceof PromptCancelled) return EXIT.error;
+    if (error instanceof ConfigError || error instanceof UpgradeError || error instanceof ImmichError || error instanceof SessionError) {
       log.error(error.message);
       return EXIT.error;
     }
@@ -138,6 +157,22 @@ function showConfig(config: Config): number {
     upgrade: { ...upgrade, intervalMs: undefined, interval: formatDuration(upgrade.intervalMs) },
   };
   console.log(JSON.stringify(readable, null, 2));
+  return EXIT.ok;
+}
+
+async function loginNow(config: Config, name: string): Promise<number> {
+  const account = findAccount(config, name);
+  const password = await readPassword(`Password for ${account.email} on ${config.immich.url ?? "Immich"}: `);
+  if (password === "") {
+    log.error("No password given");
+    return EXIT.error;
+  }
+  const outcome = await loginAccount(config, name, password);
+  console.log(
+    `Logged in as ${outcome.name} (${outcome.account.email}). The session is in ${outcome.file}` +
+      (outcome.replaced ? ", replacing the earlier one, which is ended." : ".") +
+      "\nIt shows as media-triage in the account's Authorized devices, where it can be revoked.",
+  );
   return EXIT.ok;
 }
 

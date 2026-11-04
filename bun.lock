@@ -4,6 +4,9 @@
   "workspaces": {
     "": {
       "name": "media-triage",
+      "dependencies": {
+        "@immich/sdk": "3.3.5",
+      },
       "devDependencies": {
         "@types/bun": "^1.4.4",
         "@types/picomatch": "^4.0.3",
@@ -14,11 +17,15 @@
     },
   },
   "packages": {
+    "@immich/sdk": ["@immich/sdk@3.3.5", "", { "dependencies": { "@oazapfts/runtime": "^1.0.2" } }, "sha512-R+FHMIOIfmpZkGkwL3UzD9elcwywO/BlR77zV1UsNx03f+r1FcXhrgBN5/JrcdA+Sw2pyKptpLCfCjzqIkjjdA=="],
+
     "@nodelib/fs.scandir": ["@nodelib/fs.scandir@2.1.5", "", { "dependencies": { "@nodelib/fs.stat": "2.0.5", "run-parallel": "^1.1.9" } }, "sha512-vq24Bq3ym5HEQm2NKCr3yXDwjc7vTsEThRDnkp2DK9p1uqLR+DHurm/NOTo0KG7HYHU7eppKZj3MyqYuMBf62g=="],
 
     "@nodelib/fs.stat": ["@nodelib/fs.stat@2.0.5", "", {}, "sha512-RkhPPp2zrqDAQA/2jNhnztcPAlv64XdhIp7a7454A5ovI7Bukxgt7MX7udwAu3zg1DcpPU0rz3VV1SeaqvY4+A=="],
 
     "@nodelib/fs.walk": ["@nodelib/fs.walk@1.2.8", "", { "dependencies": { "@nodelib/fs.scandir": "2.1.5", "fastq": "^1.6.0" } }, "sha512-oGB+UxlgWcgQkgwo8GcEGwemoTFt3FIO9ababBmaGwXIoBKZ+GTy0pP185beGg7Llih/NSHSV2XAs1lnznocSg=="],
+
+    "@oazapfts/runtime": ["@oazapfts/runtime@1.2.0", "", {}, "sha512-fi7dp7dNayyh/vzqhf0ZdoPfC7tJvYfjaE8MBL1yR+iIsH7cFoqHt+DV70VU49OMCqLc7wQa+yVJcSmIRnV4wA=="],
 
     "@types/bun": ["@types/bun@1.4.4", "", { "dependencies": { "bun-types": "1.4.4" } }, "sha512-9wkRDXUXK124pEnAutE6n/l18j+i9GC5IAHK8TmX/2nlySETmky0OU6yL5U8pW1AoKh++AN9auDCr647BfurjQ=="],
 

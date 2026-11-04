@@ -44,7 +44,12 @@ session stops partway.
   `test/fixtures/photo.jpg` at Immich's path, with its EXIF date. Starting takes about a minute (the images are
   cached after the first pull).
 - **`run` starts and stops cleanly. Its only job so far is the upgrade check.**
-- **Tests:** 214, all passing (`npx bun@1.4.4 test`), plus 2 against the development Immich
+- **Login and sessions** (milestone 3, step 2): `src/immich/client.ts` (`ImmichClient`: one account's session, every
+  SDK call made with its own options, errors as `ImmichError` with the HTTP status), `sessions.ts` (session files,
+  mode 600, refused if others can read them), `login.ts`, and `media-triage login <account>` (no echo on a terminal,
+  first line of stdin otherwise; logging in again ends the old session). `@immich/sdk` is pinned at 3.3.5. Checked
+  by hand through a pseudo-terminal, and with the compiled executable.
+- **Tests:** 223 without Immich, all passing (`npx bun@1.4.4 test`), and 231 with the development Immich
   (`MEDIA_TRIAGE_IMMICH_TESTS=1`). The type check is clean, and covers `test/` too.
 - **Design updated 2026-11-04** (approved by the author): sync covers the whole archive, not just the inbox, and a
   new section 13 (scale) says how that stays cheap. Section 3 corrected from 3.3.5's source: `AssetsV2` and
@@ -53,14 +58,13 @@ session stops partway.
 
 ## Next
 
-**Exactly what to do next:** milestone 3, the Immich client, from step 2. Step 1 (the development Immich) is done:
-`bun run immich up`, then `MEDIA_TRIAGE_IMMICH_TESTS=1 bun test`.
+**Exactly what to do next:** milestone 3, the Immich client, from step 2. Steps 1 and 2's login are done:
+`bun run immich up`, then `MEDIA_TRIAGE_IMMICH_TESTS=1 bun test`. Next is the sync stream. The SDK's
+`getSyncStream` reads the whole response as text, so read it with `fetch` and the SDK's types, line by line.
 1. [x] **A development Immich** for integration tests (`test/immich/`).
-2. **`src/immich/`:** add `@immich/sdk` (pin the version to the server's, 3.3.x). Wrap what the daemon needs:
-   - login (`POST /auth/login`) and the session file, plus a `media-triage login <account>` command that asks for
-     the password without echoing it, stores the token mode 600 in `<state>/sessions/<account>`, and checks it with
-     `GET /users/me`;
-   - the sync stream (`POST /sync/stream`, JSON lines) and acknowledgements (`POST /sync/ack`), for the types listed
+2. **`src/immich/`:** wrap what the daemon needs:
+   - [x] login and sessions, and `media-triage login <account>`;
+   - **next:** the sync stream (`POST /sync/stream`, JSON lines) and acknowledgements (`POST /sync/ack`), for the types listed
      in DESIGN.md section 3;
    - assets by original path, metadata refresh (the asset jobs endpoint), trash and restore, favorite and
      visibility, albums, faces (`GET`/`POST`/`PUT`/`DELETE /faces`), people and people sharing, libraries

@@ -19,5 +19,8 @@
     "fast-glob": "3.3.2",
     "picomatch": "^4.0.7",
     "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "@immich/sdk": "3.3.5"
   }
 }

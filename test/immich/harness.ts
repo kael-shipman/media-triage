@@ -9,6 +9,7 @@
 import { describe } from "bun:test";
 import { mkdirSync, mkdtempSync } from "node:fs";
 import { join, relative } from "node:path";
+import { type Config, parseConfig } from "../../src/config.ts";
 
 export const IMMICH_TESTS = process.env.MEDIA_TRIAGE_IMMICH_TESTS === "1";
 
@@ -79,3 +80,18 @@ export async function waitFor<T>(what: string, check: () => Promise<T | undefine
 
 /** The fixtures folder: small media files with made-up metadata. */
 export const FIXTURES = join(import.meta.dir, "..", "fixtures");
+
+/** A configuration for the development Immich, with both users as accounts, and the given state folder. */
+export function testConfig(stateDir: string): Config {
+  return parseConfig(
+    {
+      paths: { state: stateDir },
+      immich: {
+        url: IMMICH_URL,
+        path_map: [{ immich: `${IMMICH_MEDIA}/`, local: `${MEDIA_DIR}/` }],
+        accounts: Object.entries(USERS).map(([name, user]) => ({ name, email: user.email, admin: user.admin })),
+      },
+    },
+    null,
+  );
+}
