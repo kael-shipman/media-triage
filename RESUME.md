@@ -114,11 +114,9 @@ What milestone 5 gives it (`src/sidecars/`, `src/core/xmp.ts`):
 - `sameDate` compares dates as both tools can show them; `offsetFromImmich` gives a copy's zone as an offset.
   `regionFromFace` needs the asset's `exifInfo.orientation`.
 
-1. **First, take the check out of upkeep.** Upkeep is one scheduler job, and the scheduler runs one job at a time.
-   After changing a library, upkeep waits up to 30 minutes for Immich's scans so the check sees the result, and
-   nothing else runs meanwhile. With sync running, that would hold up every sync for the wait. So: upkeep starts the
-   scans and ends; the check becomes its own job, run when Immich's library queue is next idle
-   (`libraryQueueIdle`). Update DESIGN.md section 8, which describes the wait.
+1. [x] **The check is its own job** (done 2026-11-04): upkeep starts scans and ends; the `check` job runs after each
+   upkeep once Immich's library queue is idle twice in a row (`checkIfIdle`, `checkJob` in `src/upkeep/upkeep.ts`),
+   looking again each minute while it's busy.
 2. **State:** each asset's ID, owner, library and path (the sync stream has no paths; look up new ones in bulk with
    `libraryPages` on a first run, after a reset, or when a batch has many new assets, and one by one with `getAsset`
    otherwise), and each unit's last-synced record (section 5), with the sidecar's size and mtime. New tables are new

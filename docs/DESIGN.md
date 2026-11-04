@@ -338,12 +338,13 @@ Applied from configuration at start and on every full pass. Every step is idempo
 or a library.
 
 **In this order** (`src/upkeep/upkeep.ts`): open the accounts, bring them into one cluster group, set up the
-libraries, wait for the scans that started, run the check, then share and name people. A dry run (`--dry-run`) does
-every step that only reads, and reports what the others would change.
+libraries (starting scans where something changed), then share and name people. A dry run (`--dry-run`) does every
+step that only reads, and reports what the others would change.
 - **If Immich can't be reached** (such as while it starts after a reboot), upkeep tries again in 5 minutes rather than
   at the next full pass.
-- **Waiting for scans** lasts up to 30 minutes; after that, the check waits for the next pass. Stopping the daemon
-  doesn't wait for scans: upkeep ends at its next step.
+- **The check is a job of its own,** run after each upkeep (and on every full pass), once Immich's library queue has
+  been idle at two looks in a row, so it sees the result of any scan upkeep started. While the queue is busy it looks
+  again each minute. Upkeep doesn't wait for scans: the daemon runs one job at a time, and waiting would hold up sync.
 
 - **Libraries:** each account's libraries, with their folders and exclusion patterns.
   - The daemon creates missing libraries, corrects exclusion patterns, and starts a scan when it changed something.

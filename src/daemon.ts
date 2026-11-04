@@ -5,7 +5,7 @@ import { log } from "./log.ts";
 import { Scheduler } from "./scheduler.ts";
 import { State } from "./state.ts";
 import { upgrade } from "./upgrade.ts";
-import { upkeepJob } from "./upkeep/upkeep.ts";
+import { checkJob, upkeepJob } from "./upkeep/upkeep.ts";
 import { IS_COMPILED, VERSION } from "./version.ts";
 
 export interface DaemonOptions {
@@ -39,8 +39,14 @@ export async function runDaemon(config: Config, options: DaemonOptions): Promise
 
   // The jobs register here as they're built (RESUME.md has the milestones).
 
-  // Account upkeep (DESIGN.md, section 8): at start, then on every full pass.
-  scheduler.add("upkeep", { intervalMs: config.timing.fullPassMs, firstInMs: 0 }, () => upkeepJob(config, { dryRun: options.dryRun, signal: stopping.signal }));
+  // Account upkeep (DESIGN.md, section 8): at start, then on every full pass. The check follows each upkeep, once
+  // Immich has finished any scan it started.
+  scheduler.add("upkeep", { intervalMs: config.timing.fullPassMs, firstInMs: 0 }, async () => {
+    const result = await upkeepJob(config, { dryRun: options.dryRun, signal: stopping.signal });
+    if (!result) scheduler.trigger("check");
+    return result;
+  });
+  scheduler.add("check", { intervalMs: config.timing.fullPassMs, firstInMs: config.timing.fullPassMs }, () => checkJob(config, { signal: stopping.signal }));
 
   if (config.upgrade.enabled && !IS_COMPILED) {
     log.info("automatic upgrades are on, but this runs from source, so it won't upgrade itself");
