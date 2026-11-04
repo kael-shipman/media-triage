@@ -104,16 +104,20 @@ export async function libraryQueueIdle(admin: ImmichClient): Promise<boolean> {
 
 /**
  * Waits until the library queue has been idle twice in a row, a poll apart, so a scan that has only just been queued
- * isn't missed. Returns false if it's still busy after `timeoutMs`.
+ * isn't missed. Returns false if it's still busy after `timeoutMs`, or when `signal` aborts.
  */
-export async function waitForLibraryQueue(admin: ImmichClient, timeoutMs: number, pollMs = 1000): Promise<boolean> {
+export async function waitForLibraryQueue(admin: ImmichClient, timeoutMs: number, pollMs = 1000, signal?: AbortSignal): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   let idleBefore = false;
   for (;;) {
+    if (signal?.aborted) return false;
     const idle = await libraryQueueIdle(admin);
     if (idle && idleBefore) return true;
     idleBefore = idle;
     if (Date.now() > deadline) return false;
-    await Bun.sleep(pollMs);
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, pollMs);
+      signal?.addEventListener("abort", () => (clearTimeout(timer), resolve()), { once: true });
+    });
   }
 }

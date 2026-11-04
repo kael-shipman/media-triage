@@ -4,8 +4,8 @@ A personal utility I use to manage my household's shared photos and videos. It's
 someone with a similar setup, but it's built for mine. Expect rough edges, and read the design before relying on it.
 
 > **Status: under construction. Not usable yet.** The foundation works: the command line, the configuration,
-> self-upgrading, the installer and releases. So does the Immich client, with `media-triage login <account>`. The
-> triage itself isn't built yet. What's built and what's next:
+> self-upgrading, the installer and releases. So do the Immich client (`media-triage login <account>`) and account
+> upkeep: libraries, the cluster group, shared people, and `media-triage check`. The triage itself isn't built yet. What's built and what's next:
 > [RESUME.md](RESUME.md).
 
 ## What it's for

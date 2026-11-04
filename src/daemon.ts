@@ -5,6 +5,7 @@ import { log } from "./log.ts";
 import { Scheduler } from "./scheduler.ts";
 import { State } from "./state.ts";
 import { upgrade } from "./upgrade.ts";
+import { upkeepJob } from "./upkeep/upkeep.ts";
 import { IS_COMPILED, VERSION } from "./version.ts";
 
 export interface DaemonOptions {
@@ -18,9 +19,12 @@ export async function runDaemon(config: Config, options: DaemonOptions): Promise
   const scheduler = new Scheduler();
   let exitStatus: number = EXIT.ok;
 
-  // Before anything is logged, so a signal right after starting still stops it cleanly.
+  // Before anything is logged, so a signal right after starting still stops it cleanly. Jobs that wait get the
+  // abort signal, so stopping doesn't wait for them.
+  const stopping = new AbortController();
   const stop = (signal: string) => {
     log.info("stopping", { signal });
+    stopping.abort();
     scheduler.stop();
   };
   process.once("SIGTERM", () => stop("SIGTERM"));
@@ -34,6 +38,9 @@ export async function runDaemon(config: Config, options: DaemonOptions): Promise
   });
 
   // The jobs register here as they're built (RESUME.md has the milestones).
+
+  // Account upkeep (DESIGN.md, section 8): at start, then on every full pass.
+  scheduler.add("upkeep", { intervalMs: config.timing.fullPassMs, firstInMs: 0 }, () => upkeepJob(config, { dryRun: options.dryRun, signal: stopping.signal }));
 
   if (config.upgrade.enabled && !IS_COMPILED) {
     log.info("automatic upgrades are on, but this runs from source, so it won't upgrade itself");

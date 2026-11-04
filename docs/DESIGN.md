@@ -271,6 +271,14 @@ are in the sidecar, so they need nothing. The rest is restored once each account
 Applied from configuration at start and on every full pass. Every step is idempotent, and nothing here deletes a file
 or a library.
 
+**In this order** (`src/upkeep/upkeep.ts`): open the accounts, bring them into one cluster group, set up the
+libraries, wait for the scans that started, run the check, then share and name people. A dry run (`--dry-run`) does
+every step that only reads, and reports what the others would change.
+- **If Immich can't be reached** (such as while it starts after a reboot), upkeep tries again in 5 minutes rather than
+  at the next full pass.
+- **Waiting for scans** lasts up to 30 minutes; after that, the check waits for the next pass. Stopping the daemon
+  doesn't wait for scans: upkeep ends at its next step.
+
 - **Libraries:** each account's libraries, with their folders and exclusion patterns.
   - The daemon creates missing libraries, corrects exclusion patterns, and starts a scan when it changed something.
   - **What it compares** (`src/core/libraries.ts`): libraries are matched by owner and name. A library's folders are

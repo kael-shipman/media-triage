@@ -46,3 +46,17 @@ test("a job that throws runs again later", async () => {
   await scheduler.loop();
   expect(runs).toBe(3);
 });
+
+test("a run can ask to run again sooner than its interval", async () => {
+  const scheduler = new Scheduler();
+  let runs = 0;
+  scheduler.add("retry", { intervalMs: 60_000 }, async () => {
+    runs++;
+    if (runs === 3) scheduler.stop();
+    return { nextInMs: 1 };
+  });
+  const started = Date.now();
+  await scheduler.loop();
+  expect(runs).toBe(3);
+  expect(Date.now() - started).toBeLessThan(1_000);
+});

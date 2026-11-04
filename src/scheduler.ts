@@ -1,13 +1,18 @@
 import { formatDuration } from "./duration.ts";
 import { log } from "./log.ts";
 
+/** What a run can ask for: to run again sooner than its interval, such as after a failure worth retrying. */
+export interface RunResult {
+  nextInMs?: number;
+}
+
 interface Job {
   name: string;
   intervalMs: number;
   nextAt: number;
   /** Set by `trigger()`, so a trigger during a run isn't lost. */
   triggered: boolean;
-  run: () => Promise<void>;
+  run: () => Promise<void | RunResult>;
 }
 
 /**
@@ -21,7 +26,7 @@ export class Scheduler {
 
   constructor(private readonly now: () => number = Date.now) {}
 
-  add(name: string, timing: { intervalMs: number; firstInMs?: number }, run: () => Promise<void>): void {
+  add(name: string, timing: { intervalMs: number; firstInMs?: number }, run: () => Promise<void | RunResult>): void {
     this.jobs.push({ name, intervalMs: timing.intervalMs, nextAt: this.now() + (timing.firstInMs ?? 0), triggered: false, run });
     this.wake?.();
   }
@@ -59,14 +64,16 @@ export class Scheduler {
       if (!job) continue;
       const started = this.now();
       job.triggered = false;
+      let result: void | RunResult = undefined;
       try {
-        await job.run();
+        result = await job.run();
       } catch (error) {
         log.error(`${job.name} failed`, { error });
       }
       log.debug(`${job.name} done`, { took: formatDuration(this.now() - started) });
-      // Triggered again while it ran: leave it due. Otherwise, its next turn is an interval from now.
-      if (!job.triggered) job.nextAt = this.now() + job.intervalMs;
+      // Triggered again while it ran: leave it due. Otherwise, its next turn is an interval from now, or sooner if
+      // the run asked for it.
+      if (!job.triggered) job.nextAt = this.now() + Math.min(job.intervalMs, result?.nextInMs ?? job.intervalMs);
     }
   }
 }

@@ -10,9 +10,9 @@ session stops partway.
 
 ## Where things stand
 
-- **Built:** the command line (`help`, `version`, `init`, `config`, `run`), the TOML configuration with every setting
-  checked (unknown keys are errors), the state database with numbered migrations, the job scheduler (one job at a
-  time), and logging (journal priorities under systemd).
+- **Built:** the command line (`help`, `version`, `init`, `config`, `run`, `login`, `check`, `upgrade`), the TOML
+  configuration with every setting checked (unknown keys are errors), the state database with numbered migrations,
+  the job scheduler (one job at a time), and logging (journal priorities under systemd).
 - **Upgrades:** `media-triage upgrade` (`--check`, `--to`), and the daemon's scheduled check, which exits with
   status 75 after upgrading so systemd restarts it. Tested against a fake release server; the daemon's own path still
   needs the end-to-end check in step 5, with real executables.
@@ -43,7 +43,7 @@ session stops partway.
   (`describeImmich`, `mediaFolder`, `api`, `waitFor`). A smoke test checks that a library over the media folder indexes
   `test/fixtures/photo.jpg` at Immich's path, with its EXIF date. Starting takes about a minute (the images are
   cached after the first pull).
-- **`run` starts and stops cleanly. Its only job so far is the upgrade check.**
+- **`run` starts and stops cleanly. Its jobs so far are the upgrade check and account upkeep.**
 - **Login and sessions** (milestone 3, step 2): `src/immich/client.ts` (`ImmichClient`: one account's session, every
   SDK call made with its own options, errors as `ImmichError` with the HTTP status), `sessions.ts` (session files,
   mode 600, refused if others can read them), `login.ts`, and `media-triage login <account>` (no echo on a terminal,
@@ -105,8 +105,11 @@ session stops partway.
   list hides unnamed people with fewer than 3 faces (so those records are read one by one).
 - **Cleanup:** milestone 2's tests held a real date, a real person's name and real folder names; replaced with
   made-up ones (`7b4143a`). They remain in the repository's history.
-- **Tests:** 260 without Immich, all passing (`npx bun@1.4.4 test`), and 266 with the development Immich (as of
-  milestone 3)
+- **Milestone 4, step F:** `src/upkeep/upkeep.ts` (`runUpkeep`, in order, and the daemon's `upkeep` job, at start and
+  every full pass; retried in 5 minutes if Immich can't be reached, via a new `nextInMs` a scheduler run can return;
+  stopping aborts its wait for scans). Tested end to end, including the daemon running it in a dry run.
+- **Milestone 4 is done** (2026-11-04).
+- **Tests:** 262 without Immich, all passing (`npx bun@1.4.4 test`), and 301 with the development Immich
   (`MEDIA_TRIAGE_IMMICH_TESTS=1`). The type check is clean, and covers `test/` too.
 - **Design updated 2026-11-04** (approved by the author): sync covers the whole archive, not just the inbox, and a
   new section 13 (scale) says how that stays cheap. Section 3 corrected from 3.3.5's source: `AssetsV2` and
@@ -115,32 +118,29 @@ session stops partway.
 
 ## Next
 
-**Exactly what to do next:** milestone 4, account upkeep (DESIGN.md, section 8). Milestone 3, the Immich client, is
-done: `src/immich/` wraps every call the daemon needs, each tested against the development Immich (`bun run immich
-up`, then `MEDIA_TRIAGE_IMMICH_TESTS=1 bun test`). Milestone 4 doesn't depend on the open questions below.
+**Exactly what to do next:** milestone 5, sidecar I/O. Milestone 4, account upkeep, is done: `src/upkeep/` runs at
+start and on every full pass (accounts, cluster group, libraries, scans, the check, people), and `media-triage check`
+runs the check on demand. Everything is tested against the development Immich (`bun run immich up`, then
+`MEDIA_TRIAGE_IMMICH_TESTS=1 bun test`).
 
-0. [x] **Pure rules** (step A): the library plan and `classifyPath`.
-1. [x] **Accounts:** for each configured account, load its session (`loadSession`; no session means skip the account
-   with a message saying to run `media-triage login <account>`), and read its user ID and cluster group (`me()`).
-   Library work needs the admin account's session.
-2. [x] **Cluster group:** every account joins the first account's group (`inviteToClusterGroup` from the first account,
-   `acceptClusterGroupInvitation` with the joining account's session), **before** any library of the joining account is
-   created.
-3. [x] **Libraries:** for each `[[immich.libraries]]`, the wanted state: owner (the account's user ID), name, folders,
-   and exclusion patterns (the hidden-file patterns, the configured `exclude`, and `datedExclusions` from
-   `src/core/exclusions.ts`; at most 128). Match existing libraries by owner and name (`listLibraries`). Create the
-   missing ones, correct folders and exclusion patterns that differ, and scan only what changed. Report libraries in
-   Immich that aren't configured; never delete one. Everything is idempotent, and `--dry-run` only reports.
-4. [x] **`media-triage check`:** for each date-limited library, classify every asset's path with `allowedSince`
-   (`src/core/folder-dates.ts`), and crawl the local folders at its levels (through the path map) for files the rule
-   allows that aren't in the library. Fail loudly on either; also report undated names and inbox files dated before
-   `since`. It runs after every scan and on demand.
-5. [x] **People:** share all people both ways with the write role (`shareAllPeople`), then copy names onto the other
-   accounts' unnamed records for the same person ID (`listPeople`, `renamePeople`).
-6. **In the daemon:** run 1–5 at start and on every full pass, as one scheduler job.
+Milestone 5 (DESIGN.md, sections 6 and 10):
+1. **exiftool:** add `exiftool-vendored`, run as one long-lived process (section 13), with `-overwrite_original`
+   (section 9). DESIGN.md says the executable uses the system's exiftool (Perl can't read files embedded in it). This
+   machine has no system exiftool, but `exiftool-vendored` brings its own for Linux (it needs Perl, which is here), so
+   tests can use that; the executable must find the system's (`libimage-exiftool-perl`) and say so if it's missing.
+2. **Reading and writing a sidecar's fields:** rating, `dc:title`, `dc:description`, `dc:creator`, `dc:subject`,
+   `lr:hierarchicalSubject`, `digiKam:TagsList`, dates, GPS, and `x:xmptk` (who wrote last, F5). Write only the fields
+   that change.
+3. **Minimal sidecars** for F2 (`<file>.<ext>.xmp`, with the creator).
+4. **The daemon's own namespace** (F9: favorite, visibility, album memberships, per account), with the exiftool
+   config that defines it; check that a sidecar written by Immich (exiftool) and by Darktable (Exiv2) keeps it.
+5. **Face regions** (F10: `mwg-rs:Regions`, the box and the name).
+6. **Fixtures:** a Darktable sidecar and an Immich one, made up, with no personal data; `src/core/` already has the
+   tag and title rules to apply to them.
 
-Test each against the development Immich with fresh users (`newUser` in `test/immich/harness.ts`), since joining a
-cluster group changes an account for good.
+Also, before milestone 6: account upkeep runs as one scheduler job and can wait up to 30 minutes for scans, and no
+other job runs meanwhile. Once sync exists, that wait should move out of the job (for example, a separate check job
+that runs when the library queue is idle).
 
 **Open question for the author, F1 (needed by milestone 6):** a metadata refresh re-reads only a sidecar Immich
 already knows. Immich looks for sidecars when it first indexes a file, and `refresh-metadata` doesn't look again
@@ -193,8 +193,8 @@ Each step ends with tests passing, a commit, and this file updated.
 2. [x] Login and sessions, the sync stream, and the asset, album, face, people, library and cluster-group calls.
 3. [x] The path map (`src/core/path-map.ts`).
 
-**4. Account upkeep** (section 8): libraries, exclusion patterns, `check`, cluster group, people. Needed first by the
-author's setup.
+**4. Account upkeep** (section 8, `src/upkeep/`), done 2026-11-04: libraries, exclusion patterns, `check`, cluster
+group, people.
 
 **5. Sidecar I/O:** exiftool through `exiftool-vendored`: read and write the fields, create minimal sidecars, the
 custom namespace (F9), face regions (F10). Fixtures: a Darktable sidecar, an Immich one.
