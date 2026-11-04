@@ -81,7 +81,15 @@ session stops partway.
   get their own assets; an account that joins a group keeps its named people; sharing people works once both are in
   one group.
 - **Milestone 3 is done** (2026-11-04).
-- **Tests:** 239 without Immich, all passing (`npx bun@1.4.4 test`), and 266 with the development Immich
+- **Milestone 4, step A (pure rules):** `src/core/libraries.ts` (each library's wanted state, and the plan against
+  Immich's: create, update only what differs, report the unconfigured, refuse duplicates and too many patterns) and
+  `classifyPath` in `src/core/folder-dates.ts` (allowed, rejected and why, or outside every dated level), checked
+  against a real fast-glob crawl with the generated patterns. That crawl showed a dotted folder above a dated level
+  (`Videos/My.Clips`) isn't excluded, contrary to what DESIGN.md said; corrected.
+- **Cleanup:** milestone 2's tests held a real date, a real person's name and real folder names; replaced with
+  made-up ones (`7b4143a`). They remain in the repository's history.
+- **Tests:** 260 without Immich, all passing (`npx bun@1.4.4 test`), and 266 with the development Immich (as of
+  milestone 3)
   (`MEDIA_TRIAGE_IMMICH_TESTS=1`). The type check is clean, and covers `test/` too.
 - **Design updated 2026-11-04** (approved by the author): sync covers the whole archive, not just the inbox, and a
   new section 13 (scale) says how that stays cheap. Section 3 corrected from 3.3.5's source: `AssetsV2` and
@@ -94,6 +102,7 @@ session stops partway.
 done: `src/immich/` wraps every call the daemon needs, each tested against the development Immich (`bun run immich
 up`, then `MEDIA_TRIAGE_IMMICH_TESTS=1 bun test`). Milestone 4 doesn't depend on the open questions below.
 
+0. [x] **Pure rules** (step A): the library plan and `classifyPath`.
 1. **Accounts:** for each configured account, load its session (`loadSession`; no session means skip the account
    with a message saying to run `media-triage login <account>`), and read its user ID and cluster group (`me()`).
    Library work needs the admin account's session.

@@ -269,6 +269,11 @@ or a library.
 
 - **Libraries:** each account's libraries, with their folders and exclusion patterns.
   - The daemon creates missing libraries, corrects exclusion patterns, and starts a scan when it changed something.
+  - **What it compares** (`src/core/libraries.ts`): libraries are matched by owner and name. A library's folders are
+    its configured `folders`, and its exclusion patterns are Immich's own defaults for a new library (kept, so a
+    library made in Immich's interface isn't changed for no reason), hidden files (`**/.*`, `**/.*/**`), the
+    configured `exclude`, and the date limit's. Both are compared as sets, so their order never causes a change. Two
+    libraries of one account with the same name are a problem to fix by hand, and nothing is done to them.
   - Creating a library for another account needs the admin's session, and every library call does too. A library's
     owner is set when it's created and never changes.
   - Two accounts' libraries can index the same folder, and each gets its own assets (checked against 3.3.5).
@@ -291,8 +296,9 @@ or a library.
   - **Negated brackets are written `[^…]`.** picomatch reads `[!…]` as a literal `!`, which would silently match the
     wrong names.
   - **Files directly in a folder above a dated level** (`Videos/loose.mp4`, when the level is `Videos/*`) aren't under
-    any dated name, so `Videos/*.*` excludes them. A folder there with a dot in its name would be excluded too, and
-    the check would report its files as missing.
+    any dated name, so `Videos/*.*` excludes them. A folder there with a dot in its name (`Videos/My.Clips`) is not
+    excluded: fast-glob doesn't prune it, and picomatch's `*` doesn't reach inside it (checked by the tests). Its
+    entries are dated names like any other folder's.
 - **The check,** after every scan and on demand (`media-triage check`), classifies every indexed path with the same
   rule. It fails on:
   - any asset in a date-limited library that the rule doesn't allow;

@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import picomatch from "picomatch";
 import { MAX_EXCLUSION_PATTERNS, datedExclusions, numberRange, rejectedNames } from "./exclusions.ts";
-import { allowedSince, parseDay } from "./folder-dates.ts";
+import { allowedSince, classifyPath, parseDay } from "./folder-dates.ts";
 
 /** A deterministic pseudo-random generator (mulberry32), so failures reproduce. */
 function random(seed: number) {
@@ -124,6 +124,22 @@ describe("the crawler (fast-glob, as Immich calls it)", () => {
     writeFileSync(join(root, "Videos", "Clips", name, "b.MP4"), "");
   }
   writeFileSync(join(root, "Videos", "loose.mp4"), "");
+  writeFileSync(join(root, "Pictures", "loose.jpg"), "");
+  mkdirSync(join(root, "Videos", "My.Clips", "2021.01.01"), { recursive: true });
+  writeFileSync(join(root, "Videos", "My.Clips", "2021.01.01", "d.mp4"), "");
+
+  test("classifyPath agrees with it on every file: what it finds isn't rejected, and what it skips is", async () => {
+    const levels = [join(root, "Pictures"), join(root, "Videos/*")];
+    const options = { absolute: true, caseSensitiveMatch: false, onlyFiles: true, dot: false };
+    const globs = [`${root}/Pictures/**/*.{jpg,mp4}`, `${root}/Videos/**/*.{jpg,mp4}`];
+    const all = await fastGlob(globs, options);
+    const found = new Set(await fastGlob(globs, { ...options, ignore: datedExclusions({ since, levels }) }));
+    expect(all.length).toBeGreaterThan(found.size);
+    for (const path of all) {
+      const verdict = classifyPath(path, levels, parseDay(since));
+      expect([path, verdict.kind !== "rejected"]).toEqual([path, found.has(path)]);
+    }
+  });
 
   test("finds exactly the allowed files", async () => {
     const patterns = datedExclusions({ since, levels: [join(root, "Pictures"), join(root, "Videos/*")] });
@@ -136,7 +152,9 @@ describe("the crawler (fast-glob, as Immich calls it)", () => {
     });
     const expected = names
       .filter((name) => allowedSince(name, parseDay(since)))
-      .flatMap((name) => [join(root, "Pictures", name, "sub", "a.jpg"), join(root, "Videos", "Clips", name, "b.MP4")]);
+      .flatMap((name) => [join(root, "Pictures", name, "sub", "a.jpg"), join(root, "Videos", "Clips", name, "b.MP4")])
+      // A dotted folder above a dated level isn't excluded: only loose files there are.
+      .concat(join(root, "Videos", "My.Clips", "2021.01.01", "d.mp4"));
     expect(expected.length).toBeGreaterThan(50);
     expect(found.sort()).toEqual(expected.sort());
   });
