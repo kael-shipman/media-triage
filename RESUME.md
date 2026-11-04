@@ -28,20 +28,36 @@ session stops partway.
 - **End-to-end check, passed 2026-11-03:** installed rc.1 with `curl … install.sh | sh` into a sandbox, ran its
   daemon with `prerelease = true`, and it upgraded itself to rc.2 a minute later and exited with 75. Started again,
   it ran rc.2 and scheduled its next check six hours out.
+- **The pure rules** (`src/core/`, milestone 2):
+  - `tags.ts`: translating tags between the tools, `dc:subject`, and the three-way merge (F4);
+  - `titles.ts`: the `Title/…` tag and what a title may hold (F3);
+  - `naming.ts`: filing names exactly like the Darktable preset, wall times from EXIF, collision numbers shared by a
+    Live Photo's two files;
+  - `folder-dates.ts` and `exclusions.ts`: which names a date-limited library allows, and the exclusion patterns
+    for it, checked against picomatch and fast-glob by fuzzing and a real crawl (about 44 patterns per level);
+  - `orphans.ts`: which media file a sidecar belongs to, Darktable duplicates included (F11).
 - **`run` starts and stops cleanly. Its only job so far is the upgrade check.**
-- **Tests:** 88, all passing (`npx bun@1.4.4 test`), and the type check is clean.
+- **Tests:** 214, all passing (`npx bun@1.4.4 test`), and the type check is clean.
 
 ## Next
 
-**Exactly what to do next:** milestone 2, step 1: tags (`src/core/tags.ts`, DESIGN.md F4).
-- Translating between the tools: Immich `A/B` ↔ Darktable `A|B`, where a `/` inside a Darktable part becomes `|` in
-  Immich (Immich's own `getTagList` conversion) and back.
-- `dc:subject`: every part of every hierarchical tag, once each.
-- Leaving out Darktable's `darktable|…` tags.
-- The three-way merge of tag sets against the last-synced set: additions and removals from any side, and a union
-  when there's no last-synced set.
+**Exactly what to do next:** milestone 3: the Immich client.
+1. **A development Immich** for integration tests: a Docker Compose file under `test/immich/` (upstream's
+   `docker-compose.yml` for v3.3.x, Postgres and Redis included, machine learning off), plus a script that starts
+   it, creates an admin and a second user through the API, and stops it. Tests that need it are skipped unless
+   `MEDIA_TRIAGE_IMMICH_TESTS=1`.
+2. **`src/immich/`:** add `@immich/sdk` (pin the version to the server's, 3.3.x). Wrap what the daemon needs:
+   - login (`POST /auth/login`) and the session file, plus a `media-triage login <account>` command that asks for
+     the password without echoing it, stores the token mode 600 in `<state>/sessions/<account>`, and checks it with
+     `GET /users/me`;
+   - the sync stream (`POST /sync/stream`, JSON lines) and acknowledgements (`POST /sync/ack`), for the types listed
+     in DESIGN.md section 3;
+   - assets by original path, metadata refresh (the asset jobs endpoint), trash and restore, favorite and
+     visibility, albums, faces (`GET`/`POST`/`PUT`/`DELETE /faces`), people and people sharing, libraries
+     (create, update exclusion patterns, scan), and cluster groups (invite, accept).
+3. **The path map:** translate between Immich's paths and local ones, both ways (`immich.path_map`).
 
-Pure functions, no I/O, with tests beside them.
+Check each call's request and response shapes in the SDK; the server's `/api/spec` is the reference.
 
 ## Milestones
 
@@ -57,11 +73,11 @@ Each step ends with tests passing, a commit, and this file updated.
    upgrade end to end.
 
 **2. The pure rules** (`src/core/`, no I/O)
-1. [ ] Tags: translation between the tools, `dc:subject`, three-way merge (F4).
-2. [ ] Titles (F3).
-3. [ ] Filing names and collisions (section 7).
-4. [ ] Folder dates and exclusion patterns, tested against picomatch (section 8).
-5. [ ] Orphan sidecars: which media file a sidecar belongs to (F11).
+1. [x] Tags: translation between the tools, `dc:subject`, three-way merge (F4).
+2. [x] Titles (F3).
+3. [x] Filing names and collisions (section 7).
+4. [x] Folder dates and exclusion patterns, tested against picomatch and fast-glob (section 8).
+5. [x] Orphan sidecars: which media file a sidecar belongs to (F11).
 
 **3. Immich client:** login and sessions, the sync stream, and the asset, face, album, library, people and
 cluster-group calls. Integration tests against a development Immich in Docker Compose.

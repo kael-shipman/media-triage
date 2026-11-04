@@ -1,0 +1,62 @@
+// Tags, as Immich and Darktable each write them in a sidecar (DESIGN.md, F4).
+//
+// Immich writes `digiKam:TagsList` as "Parent/Child". Darktable writes `lr:hierarchicalSubject` as "Parent|Child",
+// plus `dc:subject` with every part of every tag. Each tool reads only its own field, so keeping them equal shows
+// every tag once in each tool. The canonical form here is Immich's.
+
+/** Darktable's own tags ("darktable|format|jpg", "darktable|changed"), which aren't synced. */
+export function isDarktableInternal(darktableTag: string): boolean {
+  return darktableTag === "darktable" || darktableTag.startsWith("darktable|");
+}
+
+/**
+ * Darktable's "Parent|Child" as Immich shows it: the parts joined with "/", with any "/" inside a part turned into
+ * "|". That's Immich's own conversion (metadata.service.ts, getTagList), so "Music|AC/DC" is "Music/AC|DC".
+ */
+export function toImmich(darktableTag: string): string {
+  return darktableTag
+    .split("|")
+    .map((part) => part.replaceAll("/", "|"))
+    .join("/");
+}
+
+/** Immich's "Parent/Child" as Darktable writes it. Undoes `toImmich`. */
+export function toDarktable(immichTag: string): string {
+  return immichTag
+    .split("/")
+    .map((part) => part.replaceAll("|", "/"))
+    .join("|");
+}
+
+/** `dc:subject` for Darktable's hierarchical tags: every part of every tag, once each, in first-seen order. */
+export function dcSubject(darktableTags: Iterable<string>): string[] {
+  const parts = new Set<string>();
+  for (const tag of darktableTags) {
+    for (const part of tag.split("|")) if (part !== "") parts.add(part);
+  }
+  return [...parts];
+}
+
+/**
+ * Three-way merge of tag sets. Each side's changes since `base` (the last-synced set) apply: a tag added on any side
+ * is added, and a tag removed on any side is removed. Without a base (the state was lost), it's the union, which
+ * never drops a tag. The result is sorted, so equal sets compare equal.
+ */
+export function mergeTags(base: Iterable<string> | undefined, sides: Iterable<string>[]): string[] {
+  const sets = sides.map((side) => new Set(side));
+  const result = new Set<string>();
+  if (base === undefined) {
+    for (const set of sets) for (const tag of set) result.add(tag);
+  } else {
+    const baseSet = new Set(base);
+    for (const tag of baseSet) if (sets.every((set) => set.has(tag))) result.add(tag);
+    for (const set of sets) for (const tag of set) if (!baseSet.has(tag)) result.add(tag);
+  }
+  return [...result].sort();
+}
+
+/** Whether two tag lists hold the same tags, in any order. */
+export function sameTags(a: Iterable<string>, b: Iterable<string>): boolean {
+  const [x, y] = [new Set(a), new Set(b)];
+  return x.size === y.size && [...x].every((tag) => y.has(tag));
+}

@@ -231,8 +231,16 @@ or a library.
     `since`'s year and a later month, or with `since`'s month and a day on or after `since`'s. Dates are written
     `YYYY.MM.DD`, `YYYY-MM-DD` or `YYYYMMDD`. What follows the date doesn't matter.
   - **The exclusion patterns** (`src/core/exclusions.ts`) are generated from that rule: globs for every prefix that
-    can't start an allowed name. They're tested against picomatch, which Immich matches them with. Immich allows at
-    most 128 patterns per library.
+    can't start an allowed name, each written `<level>/<prefix>{,/**}` so it covers the name and everything inside.
+    About 44 per level; Immich allows at most 128 per library.
+  - **Tested against the matchers Immich uses:** picomatch (its watcher, with `dot: true`, and its check of existing
+    assets, with `nocase: true`) and fast-glob (its crawler, with the options it passes). The tests fuzz thousands of
+    names around several cutover dates, and crawl a real folder tree.
+  - **Negated brackets are written `[^…]`.** picomatch reads `[!…]` as a literal `!`, which would silently match the
+    wrong names.
+  - **Files directly in a folder above a dated level** (`Videos/loose.mp4`, when the level is `Videos/*`) aren't under
+    any dated name, so `Videos/*.*` excludes them. A folder there with a dot in its name would be excluded too, and
+    the check would report its files as missing.
 - **The check,** after every scan and on demand (`media-triage check`), classifies every indexed path with the same
   rule. It fails on:
   - any asset in a date-limited library that the rule doesn't allow;
