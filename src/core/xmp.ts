@@ -8,10 +8,13 @@
 // - the date: `exif:DateTimeOriginal`, and Immich's `photoshop:DateCreated`, which it reads first (MWG). Darktable
 //   reads the first and keeps the second, but has no time zones: it drops a date's offset when it reads one, and
 //   writes dates without. So the second holds the capture time with its offset (see `planWrite`);
-// - the tags: Darktable's `lr:hierarchicalSubject` and `dc:subject`, and Immich's `digiKam:TagsList`.
-// A copy is written only where it already exists, as Immich keeps it there.
+// - the tags: Darktable's `lr:hierarchicalSubject` and `dc:subject`, and Immich's `digiKam:TagsList`, which also
+//   holds the title as a tag (F3).
+// Immich's copies are written where they already exist, and where they're needed to hold what Darktable's fields
+// can't: a date's offset, a title tag.
 
 import { type RegionInfo } from "./regions.ts";
+import { titleTag } from "./titles.ts";
 import { dcSubject, isDarktableInternal, isDarktableInternalInImmich, sameTags, toDarktable, toImmich } from "./tags.ts";
 import { parseWallTime } from "./naming.ts";
 
@@ -289,8 +292,12 @@ export function planWrite(fields: XmpFields, wanted: Wanted): Assignments {
     const hierarchical = [...(fields.hierarchicalSubject ?? []).filter(isDarktableInternal), ...wanted.tags.map(toDarktable)];
     setList(plan, TAGS.hierarchicalSubject, hierarchical, fields.hierarchicalSubject);
     setList(plan, TAGS.subject, dcSubject(hierarchical), fields.subject);
-    if (fields.tagsList !== undefined) {
-      setList(plan, TAGS.tagsList, [...fields.tagsList.filter(isDarktableInternalInImmich), ...wanted.tags], fields.tagsList);
+    // Immich's tags hold the title as a tag (F3), which Darktable's fields don't. So `TagsList` is written where it
+    // exists, and also where there's a title: without it, Immich would read Darktable's fields, and miss the title.
+    const title = wanted.title !== undefined ? wanted.title : (fields.title ?? null);
+    if (fields.tagsList !== undefined || title !== null) {
+      const immich = [...(fields.tagsList ?? []).filter(isDarktableInternalInImmich), ...wanted.tags, ...(title !== null ? [titleTag(title)] : [])];
+      setList(plan, TAGS.tagsList, immich, fields.tagsList);
     }
   }
 

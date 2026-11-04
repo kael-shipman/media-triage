@@ -98,12 +98,12 @@ describe("writing", () => {
     const outcome = await writeSidecar(exiftool, sidecar, { rating: 5, tags: ["Places/Lake", "Music/AC|DC"], title: "Lake day" });
     expect(outcome.status).toBe("written");
     if (outcome.status !== "written") return;
-    expect(Object.keys(outcome.plan).sort()).toEqual(["XMP-dc:Subject", "XMP-lr:HierarchicalSubject", "XMP-xmp:Rating"]);
+    expect(Object.keys(outcome.plan).sort()).toEqual(["XMP-dc:Subject", "XMP-digiKam:TagsList", "XMP-lr:HierarchicalSubject", "XMP-xmp:Rating"]);
     expect(outcome.stamp).toEqual(stampOf(path)!);
 
     const after = (await readSidecar(exiftool, path))!;
     expect(darktableReads(after.fields)).toEqual({ ...darktableReads(sidecar.fields), rating: 5, tags: ["Places/Lake", "Music/AC|DC"] });
-    expect(immichReads(after.fields).tags).toEqual(["Places/Lake", "Music/AC|DC"]);
+    expect(immichReads(after.fields).tags).toEqual(["Places/Lake", "Music/AC|DC", "Title/Lake day"]);
     expect(after.fields.hierarchicalSubject).toContain("darktable|format|jpg");
     expect(after.fields.toolkit).toMatch(/ExifTool/);
     // Darktable's own fields are untouched, the permissions kept, and there's no backup beside it.
@@ -115,7 +115,7 @@ describe("writing", () => {
   test("nothing to change, nothing written", async () => {
     const path = copyOf("darktable");
     const sidecar = (await readSidecar(exiftool, path))!;
-    expect(await writeSidecar(exiftool, sidecar, { rating: 3, tags: ["Places/Lake", "People/Robin Example"], date: "2021:06:15 10:20:30" })).toEqual({ status: "unchanged" });
+    expect(await writeSidecar(exiftool, sidecar, { rating: 3, title: "Lake day", date: "2021:06:15 10:20:30" })).toEqual({ status: "unchanged" });
     expect(stampOf(path)).toEqual(sidecar.stamp);
   });
 

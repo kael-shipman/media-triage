@@ -178,7 +178,8 @@ If the state is lost, merge as a union, which never drops a tag, and report it.
     - Darktable reads `lr:hierarchicalSubject`, or `dc:subject` when there's none (`src/common/exif.cc`).
   - **Translating:** split on `|`, turn each `/` inside a part into `|`, and join with `/`. That's Immich's own
     conversion (`getTagList`), so a Darktable tag `Music|AC/DC` is `Music/AC|DC` in Immich. The reverse undoes it.
-  - Write `TagsList` only where it already exists. Without it, Immich reads `HierarchicalSubject`, so the sidecars
+  - Write `TagsList` where it already exists, and where there's a title: Immich's tags hold the title as a tag (F3),
+    which Darktable's fields don't, and without `TagsList` Immich reads `HierarchicalSubject`. Otherwise the sidecars
     Darktable wrote need no change.
   - Leave out Darktable's own `darktable|…` tags. Immich reads them too when there's no `TagsList`, and shows
     `darktable/format/jpg`, so they're left out on both sides. They're never added or removed in any field: a write

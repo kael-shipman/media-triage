@@ -130,7 +130,7 @@ describe("sameDate", () => {
 
 describe("planWrite", () => {
   test("nothing to write when everything already says what's wanted", () => {
-    const fields = parseXmp(darktableRaw);
+    const fields = { ...parseXmp(darktableRaw), tagsList: ["Places/Lake", "Title/1.50"] };
     expect(
       planWrite(fields, {
         rating: 3,
@@ -160,11 +160,14 @@ describe("planWrite", () => {
     expect(planWrite({ ...immichFields, description: "New" }, { description: "New" })).toEqual({ [TAGS.immichDescription]: "New" });
   });
 
-  test("tags go to Darktable's fields, and to TagsList only where it exists; Darktable's own tags stay", () => {
-    expect(planWrite(parseXmp(darktableRaw), { tags: ["Places/Lake", "People/Robin Example"] })).toEqual({
+  test("tags go to Darktable's fields, and to TagsList where it exists or there's a title; Darktable's own tags stay", () => {
+    const { title: _, ...untitled } = parseXmp(darktableRaw);
+    expect(planWrite(untitled, { tags: ["Places/Lake", "People/Robin Example"] })).toEqual({
       [TAGS.hierarchicalSubject]: ["darktable|format|jpg", "Places|Lake", "People|Robin Example"],
       [TAGS.subject]: ["darktable", "format", "jpg", "Places", "Lake", "People", "Robin Example"],
     });
+    // With a title, Immich needs TagsList to see it as a tag.
+    expect(planWrite(parseXmp(darktableRaw), { tags: ["Places/Lake"] })).toEqual({ [TAGS.tagsList]: ["Places/Lake", "Title/1.50"] });
     expect(planWrite(immichFields, { tags: ["Music/AC|DC"] })).toEqual({
       [TAGS.hierarchicalSubject]: ["darktable|format|jpg", "Music|AC/DC"],
       [TAGS.subject]: ["darktable", "format", "jpg", "Music", "AC/DC"],

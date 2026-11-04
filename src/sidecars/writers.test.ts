@@ -23,6 +23,9 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
+/** Darktable takes a few seconds each run. */
+const DARKTABLE_TIMEOUT = 60_000;
+
 const accounts: AccountState[] = [
   { user: "4f1c2d3e-0000-4000-8000-000000000001", favorite: true, visibility: "archive", albums: [{ id: "a1", name: "Lake, 2021 [summer]" }] },
   { user: "4f1c2d3e-0000-4000-8000-000000000002", favorite: false, visibility: "timeline", albums: [{ id: "a2", name: "Robin" }] },
@@ -61,7 +64,7 @@ describeDarktable("Darktable keeps the daemon's fields", () => {
     expect(after.fields.toolkit).toMatch(/Exiv2/);
     expect(darktableReads(after.fields)).toEqual({ ...darktableReads(before.fields), rating: 1 });
     expectOurs(after);
-  });
+  }, DARKTABLE_TIMEOUT);
 
   test("when it rewrites one Immich wrote: Immich's copies stay, and its date loses the offset", async () => {
     const photo = await photoWithOurFields(dir, "immich");
@@ -77,7 +80,7 @@ describeDarktable("Darktable keeps the daemon's fields", () => {
     // It reads the tags from its own fields, which Immich's sidecar doesn't have.
     expect(darktableReads(after.fields).tags).toEqual([]);
     expect(immichReads(after.fields)).toEqual({ ...immichReads(before.fields), rating: 2 });
-  });
+  }, DARKTABLE_TIMEOUT);
 });
 
 describeDarktable("a capture time changed in Darktable", () => {
@@ -101,7 +104,7 @@ describeDarktable("a capture time changed in Darktable", () => {
     const again = (await readSidecar(exiftool, `${photo}.xmp`))!;
     expect(again.fields.date).toMatch(/^2021:06:15 11:45:00(\.000)?$/);
     expect(await writeSidecar(exiftool, again, { date: darktableReads(again.fields).date! })).toEqual({ status: "unchanged" });
-  });
+  }, DARKTABLE_TIMEOUT);
 });
 
 describeImmich("Immich keeps the daemon's fields", () => {

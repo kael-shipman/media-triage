@@ -148,9 +148,8 @@ What milestone 5 gives it (`src/sidecars/`, `src/core/xmp.ts`):
    `immichReads` of the new sidecar, trash or restore copies after checking `isOffline` with `getAsset`, F2's
    minimal sidecar for inbox sources, record the unit; dry run writes nothing, records nothing, acknowledges
    nothing), then the daemon's `sync` job (watcher into `DirtyUnits`, full pass daily, each account's stream with
-   the reconcile as `act`; `learnAllAssets` when an account has no assets yet or after a reset). Also needed: when a
-   title must reach Immich and the sidecar has no `TagsList`, write one (Immich would otherwise read
-   `hierarchicalSubject`, which doesn't hold the title tag).
+   the reconcile as `act`; `learnAllAssets` when an account has no assets yet or after a reset). Done too: `planWrite`
+   writes `TagsList` where there's a title, so the title tag reaches Immich.
    Originally: the reconcile loop (section 5) and F1–F8, with the merge from `src/core/tags.ts`. Each copy's tags come from
    `getAsset` (`tags`). Writes to Immich in bulk (`refreshMetadata`, `trashAssets`, `restoreAssets`).
 6. **F1's setting** (whether the server reads new sidecars on refresh), and F8's offline check.
