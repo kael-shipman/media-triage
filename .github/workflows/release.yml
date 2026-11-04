@@ -1,0 +1,33 @@
+name: Release
+
+# Pushing a tag vX.Y.Z publishes a release with an executable per platform and SHA256SUMS. A tag with a hyphen
+# (v1.2.0-rc.1) publishes a pre-release, which only installs and daemons that allow pre-releases take.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun test
+      - run: bun run build "$GITHUB_REF_NAME"
+      - name: Check the executable reports the tag's version
+        run: test "$(dist/media-triage-linux-x64 version)" = "media-triage ${GITHUB_REF_NAME#v}"
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prerelease=""
+          case "$GITHUB_REF_NAME" in *-*) prerelease="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" dist/media-triage-linux-x64 dist/media-triage-linux-arm64 dist/SHA256SUMS \
+            --title "$GITHUB_REF_NAME" --generate-notes $prerelease

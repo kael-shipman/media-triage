@@ -19,6 +19,9 @@ session stops partway.
 - **The installer,** `install.sh`: picks the release, checks its hash and its `version`, installs into `~/.local/bin`,
   runs `init`, and optionally writes and enables a user or system systemd unit. Tested with dash against a fake
   release server, with `systemctl` stubbed. shellcheck is clean (`npx shellcheck -s sh install.sh`).
+- **Builds:** `bun run build [version]` makes `dist/media-triage-linux-{x64,arm64}` (about 110 MB each) and
+  `SHA256SUMS`. Checked: the executable reports its version, knows it's compiled, and embeds the example config.
+- **Workflows:** `ci.yml` (push and pull request) and `release.yml` (`v*` tags), not yet run on GitHub.
 - **`run` starts and stops cleanly. Its only job so far is the upgrade check.**
 - **Tests:** 88, all passing (`npx bun@1.4.4 test`), and the type check is clean.
 
