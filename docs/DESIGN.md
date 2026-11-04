@@ -76,8 +76,12 @@ video. Units in the archive count as much as units in the inbox (section 1).
    since its identity is a hash of the path (`library.service.ts`), so each is looked up once (section 13).
 
    **Acknowledging:** each line of the stream carries an acknowledgement (`<type>|<id>`). The server keeps one
-   checkpoint per type, so after acting on a batch the daemon acknowledges the last line of each type, including the
-   stream's closing `SyncCompleteV1`. A restart resumes where it stopped.
+   checkpoint per type, so after acting on a batch (up to 1,000 changes) the daemon acknowledges the last line of each
+   type, including the stream's closing `SyncCompleteV1`. A restart resumes where it stopped, and so does a stream
+   cut off before its end: what arrived is acted on and acknowledged. Lines that are only acknowledgements
+   (`SyncAckV1`, the end of a backfill) and types the daemon doesn't know are acknowledged and otherwise skipped. When
+   an account gains access to an album that already has assets, `AlbumToAssetsV1` also sends them, as
+   `AlbumToAssetBackfillV1`.
 
    **Resets:** instead of changes, the server can send `SyncResetV1`. It does when the session was flagged for a
    reset, or when its last completed sync is more than 30 days old (`sync.service.ts`, `needsFullSync`), since older
@@ -315,7 +319,8 @@ or a library.
   - `src/main.ts`: the command line;
   - `src/core/`: the pure rules, without I/O;
   - `src/immich/`: the Immich client: one `ImmichClient` per account's session, wrapping `@immich/sdk` (pinned to the
-    server's version), plus the sessions and `login`;
+    server's version), plus the sessions and `login`, and the sync stream (`sync.ts`, read with `fetch`, since the
+    SDK's `getSyncStream` reads the whole response as text);
   - each module's tests sit beside it (`*.test.ts`).
   - `test/immich/`: a development Immich for the integration tests (`compose.yml`, started and stopped by `dev.ts`),
     and what the tests share (`harness.ts`). Tests that need it are skipped unless `MEDIA_TRIAGE_IMMICH_TESTS=1`;
