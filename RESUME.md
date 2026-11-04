@@ -93,6 +93,12 @@ session stops partway.
   list, the plan, create only for accounts in the group, correct, scan what changed, report the unconfigured) and
   `waitForLibraryQueue` in `src/immich/libraries.ts`. Tested end to end: a date-limited library indexes exactly the
   allowed files, and moving its cutover takes the newly excluded ones out.
+- **Milestone 4, step D:** `src/upkeep/check.ts` and `media-triage check`. Tested against the development Immich: a
+  correct library passes; leaked assets fail, and still fail once offline in the trash; patterns that leave out an
+  allowed folder show its files as missing; a wrong path map is a failure, not a pass. Found on the way: matching the
+  hidden-file patterns against local paths inside a hidden folder (like Emmer's `~/.data/archive`) excluded
+  everything, so exclusions are matched against Immich's paths. `fast-glob` and `picomatch` are runtime dependencies
+  now (pinned, as Immich uses them); `src/core/media.ts` lists Immich's extensions.
 - **Cleanup:** milestone 2's tests held a real date, a real person's name and real folder names; replaced with
   made-up ones (`7b4143a`). They remain in the repository's history.
 - **Tests:** 260 without Immich, all passing (`npx bun@1.4.4 test`), and 266 with the development Immich (as of
@@ -121,7 +127,7 @@ up`, then `MEDIA_TRIAGE_IMMICH_TESTS=1 bun test`). Milestone 4 doesn't depend on
    `src/core/exclusions.ts`; at most 128). Match existing libraries by owner and name (`listLibraries`). Create the
    missing ones, correct folders and exclusion patterns that differ, and scan only what changed. Report libraries in
    Immich that aren't configured; never delete one. Everything is idempotent, and `--dry-run` only reports.
-4. **`media-triage check`:** for each date-limited library, classify every asset's path with `allowedSince`
+4. [x] **`media-triage check`:** for each date-limited library, classify every asset's path with `allowedSince`
    (`src/core/folder-dates.ts`), and crawl the local folders at its levels (through the path map) for files the rule
    allows that aren't in the library. Fail loudly on either; also report undated names and inbox files dated before
    `since`. It runs after every scan and on demand.

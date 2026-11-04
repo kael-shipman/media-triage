@@ -157,10 +157,10 @@ export async function newUser(adminToken: string, label: string, options: { admi
   return user;
 }
 
-/** Copies of the fixture photo at these paths, relative to `root`. */
-export function photos(root: string, paths: string[]): void {
+/** Copies of a fixture photo (by default `photo.jpg`, dated 2021-06-15) at these paths, relative to `root`. */
+export function photos(root: string, paths: string[], fixture = "photo.jpg"): void {
   for (const path of paths) {
     mkdirSync(join(root, path, ".."), { recursive: true });
-    copyFileSync(join(FIXTURES, "photo.jpg"), join(root, path));
+    copyFileSync(join(FIXTURES, fixture), join(root, path));
   }
 }

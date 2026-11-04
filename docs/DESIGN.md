@@ -315,6 +315,22 @@ or a library.
 
   A failure is reported loudly, and the daemon changes nothing to fix it. It also reports the undated names, and inbox
   files dated before `since`.
+
+  How it works (`src/upkeep/check.ts`):
+  - **Both directions use the rule** (`classifyPath`), not the exclusion patterns made from it, so a mistake in the
+    patterns shows up.
+  - **Every asset counts,** offline ones included: an asset that went offline is in the account's trash, where its
+    thumbnail still shows. Locked assets can't be listed without the account's PIN, so they aren't checked.
+  - **Files are found as Immich's crawler finds them** (fast-glob, its extensions and options, inside each folder),
+    and the library's other exclusions are matched against Immich's paths, with the options Immich's watcher uses.
+    Matching local paths instead would go wrong when the local folders are inside a hidden one (`~/.data/…`).
+  - **Files changed since the library's last scan** (by ctime, which a move updates) are left for the next check.
+  - **Nothing is assumed:** a library that doesn't exist yet, hasn't been scanned, belongs to an account that isn't
+    logged in, or whose folders hold no media files here while Immich has some (a wrong path map) is a failure.
+  - **Inbox files dated before `since`** are the owner's assets, in libraries whose folders are all in the inbox, with
+    an Immich date (`localDateTime`) before it.
+  - It needs the admin's session to find the libraries, and each owner's to list its assets. `media-triage check`
+    prints the report and exits with 1 if anything failed or couldn't be checked.
 - **Cluster group:** every configured account is in one cluster group (Immich 3.2).
   - An account that isn't gets invited from the first account's group, and accepts with its own session.
   - This happens **before that account's libraries are created**, so its faces cluster into the people that already

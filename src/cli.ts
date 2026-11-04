@@ -8,10 +8,13 @@ import { formatDuration } from "./duration.ts";
 import { EXIT } from "./exit.ts";
 import { ImmichError } from "./immich/client.ts";
 import { findAccount, loginAccount } from "./immich/login.ts";
+import { listLibraries } from "./immich/libraries.ts";
 import { SessionError } from "./immich/sessions.ts";
 import { LEVELS, type Level, log, setLogLevel } from "./log.ts";
 import { defaultConfigPath } from "./paths.ts";
 import { PromptCancelled, readPassword } from "./prompt.ts";
+import { openAccounts } from "./upkeep/accounts.ts";
+import { checkLibraries, formatReport } from "./upkeep/check.ts";
 import { UpgradeError, upgrade } from "./upgrade.ts";
 import { IS_COMPILED, VERSION } from "./version.ts";
 
@@ -23,6 +26,7 @@ Usage: media-triage <command> [options]
 Commands:
   run              Run the daemon
   login ACCOUNT    Log an Immich account in, with its password, and keep the session
+  check            Check that each library limited by date holds exactly what its date allows
   init             Write a starter configuration, unless there's one already
   config           Check the configuration, and print it with the defaults filled in
   upgrade          Upgrade to the newest release the configuration's [upgrade] track allows
@@ -55,6 +59,7 @@ const COMMAND_ARGUMENTS: Record<string, readonly string[]> = { login: ["ACCOUNT"
 const COMMAND_OPTIONS: Record<string, readonly string[]> = {
   run: ["dry-run"],
   login: [],
+  check: [],
   init: [],
   config: [],
   upgrade: ["check", "to"],
@@ -110,6 +115,8 @@ export async function main(argv: string[]): Promise<number> {
         return await upgradeNow(loadConfig(configFile, { optional: true }), { check: values.check ?? false, to: values.to });
       case "login":
         return await loginNow(loadConfig(configFile), args[0]!);
+      case "check":
+        return await checkNow(loadConfig(configFile));
       case "run": {
         const config = loadConfig(configFile);
         if (!logLevel) setLogLevel(config.log.level);
@@ -174,6 +181,20 @@ async function loginNow(config: Config, name: string): Promise<number> {
       "\nIt shows as media-triage in the account's Authorized devices, where it can be revoked.",
   );
   return EXIT.ok;
+}
+
+/** `media-triage check`: prints the report, and exits with 1 if anything failed or couldn't be checked. */
+async function checkNow(config: Config): Promise<number> {
+  const accounts = await openAccounts(config);
+  for (const { account, problem } of accounts.problems) log.warn("account skipped", { account: account.name, problem });
+  const admin = accounts.open.find((open) => open.account.admin);
+  if (!admin) {
+    log.error("The check needs the admin account's session, to find the libraries: configure one with admin = true, and log it in.");
+    return EXIT.error;
+  }
+  const report = await checkLibraries(config, accounts.open, await listLibraries(admin.client));
+  console.log(formatReport(report).join("\n"));
+  return report.ok ? EXIT.ok : EXIT.error;
 }
 
 async function upgradeNow(config: Config, options: { check: boolean; to?: string }): Promise<number> {
