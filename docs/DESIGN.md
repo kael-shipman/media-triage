@@ -159,7 +159,9 @@ If the state is lost, merge as a union, which never drops a tag, and report it.
     take too. A setting, like `mirrors_face_corrections`, says whether the server has it. On a server without it, the
     daemon still refreshes, and sidecars that appeared after indexing stay unread there.
 - **F2. Creator.** A file in an inbox source with no `dc:creator` gets the source's creator. An existing creator is
-  never overwritten. Most new photos have no sidecar yet, so create a minimal `<file>.<ext>.xmp`.
+  never overwritten. Most new photos have no sidecar yet, so create a minimal `<file>.<ext>.xmp`, the name both tools
+  look for first. It's written under a hidden temporary name and linked into place, which fails if a sidecar appeared
+  in the meantime, so it never replaces one (`src/sidecars/sidecar.ts`, `createSidecar`).
 - **F3. Title.** The tag `Title/<title>` (Immich) and `dc:title` (Darktable) stay equal.
   - Two different titles on one photo are a conflict: report it and change nothing.
   - A `/` or `|` in a title is refused: it would nest the tag in one of the tools.
@@ -173,10 +175,25 @@ If the state is lost, merge as a union, which never drops a tag, and report it.
     conversion (`getTagList`), so a Darktable tag `Music|AC/DC` is `Music/AC|DC` in Immich. The reverse undoes it.
   - Write `TagsList` only where it already exists. Without it, Immich reads `HierarchicalSubject`, so the sidecars
     Darktable wrote need no change.
-  - Leave out Darktable's own `darktable|…` tags.
-- **F5. Rejects.** When Immich rewrites a rejected photo's sidecar (`-1` becomes `0`), put the reject back. `x:xmptk`
-  tells who wrote last: exiftool means Immich or the daemon, Exiv2 means Darktable, whose un-reject stands.
-- **F6. Ratings, descriptions, dates and GPS** are the same fields in both tools.
+  - Leave out Darktable's own `darktable|…` tags. Immich reads them too when there's no `TagsList`, and shows
+    `darktable/format/jpg`, so they're left out on both sides. They're never added or removed in any field: a write
+    keeps the ones each field had.
+- **F5. Rejects: not handled** (decided 2026-11-04). Immich reads a sidecar's `-1` as unrated, and writes `0` the next
+  time it rewrites the sidecar. That doesn't matter in practice: the author triages in one tool at a time, deletes the
+  photos rejected in Darktable right after triaging, and Immich has no background job that rewrites sidecars meanwhile.
+- **F6. Ratings, descriptions, dates and GPS** are the same in both tools, with two copies Immich keeps for itself
+  (checked against 3.3.5):
+  - **Immich writes each value twice and reads its own copy first.** With MWG on, its sidecar write puts the
+    description in `dc:description` and `tiff:ImageDescription`, and the date in `exif:DateTimeOriginal` and
+    `photoshop:DateCreated`. It reads `ImageDescription` before `Description`, and the date from MWG, which in a
+    sidecar is `photoshop:DateCreated` (`metadata.service.ts`). Darktable reads and writes only `dc:description` and
+    `exif:DateTimeOriginal`, so after Immich has written a sidecar, Darktable's edits to those two don't reach Immich.
+    So the daemon writes both copies, but each copy only where it already exists, as with `TagsList` (F4).
+  - **Darktable drops the date's offset.** It reads Immich's `2021-06-15T10:20:30.000+02:00` and writes
+    `2021:06:15 10:20:30.000`. Dates are compared by wall time, to the second, and by offset only when both have one.
+    A date written without an offset keeps the one the field had.
+  - Ratings are `xmp:Rating` and GPS is `exif:GPSLatitude` and `exif:GPSLongitude` in both. Immich reads only ratings
+    1 to 5 (F5).
 - **F7. Several accounts.** Each copy writes the whole sidecar from its own state. So an edit in one account can undo
   one made a minute earlier in another, before that copy re-read it.
   - Each copy, read through the API, is a source next to the sidecar.
@@ -192,15 +209,33 @@ If the state is lost, merge as a union, which never drops a tag, and report it.
     online copies, and emptying their trash 30 days later would delete the files.
 - **F9. Immich-only state, in the sidecar.** For each account: favorite, visibility (archived, locked) and album
   memberships (the album's ID and name).
-  - Stored in a namespace of the daemon's own, keyed by account, and written when they change.
+  - Stored in a namespace of the daemon's own (`mediatriage`,
+    `https://github.com/kael-shipman/media-triage/ns/1.0/`), in one field, `mediatriage:Accounts`: a list with an entry
+    per account (`User`, `Favorite`, `Visibility`, and `Albums`, each with `Id` and `Name`). `src/sidecars/namespace.ts`
+    shows its shape.
+  - **Keyed by the account's Immich user ID,** which never changes, and belongs to the same server as the album IDs.
+    The configuration's account names are only labels.
+  - **Written when they change, and only what isn't the default:** an account with nothing to record has no entry, and
+    an entry leaves out `Favorite` when false, `Visibility` when "timeline", and `Albums` when there are none. So most
+    sidecars never get the field, and the first pass over the archive doesn't rewrite them all.
   - **Not mirrored between accounts:** they belong to each person.
   - Filing puts them back (section 7).
-  - Writing a custom namespace needs an exiftool config that defines it. Check that Immich's sidecar writes and
-    Darktable's (it keeps fields it doesn't own) both keep it.
+  - Writing a custom namespace needs an exiftool config that defines it, which the daemon writes to a temporary folder
+    and passes to exiftool. **Checked: Immich and Darktable both keep it** when they rewrite a sidecar (Immich 3.3.5
+    with its own exiftool, which doesn't know the namespace; Darktable 5.6.1, which reads and keeps every field it
+    doesn't own). `src/sidecars/writers.test.ts` checks both, along with face regions.
 - **F10. Named faces, in the sidecar.** For every named, visible person with a face in the photo (in any copy):
   - a `People|<name>` tag (`People/<name>` in Immich), so Darktable can filter by person;
   - an MWG face region (`mwg-rs:Regions`: the box and the name), the standard Lightroom, digiKam and Picasa use.
     Darktable keeps regions and transforms them on export, and Immich can read them. Filing uses them (section 7).
+  - **Coordinates** (`src/core/regions.ts`): a region is its centre and size as fractions of the image as stored,
+    before the EXIF orientation is applied. Immich's faces are boxes in pixels of the image as shown. Immich reads a
+    region by rotating it with the orientation (`metadata.service.ts`, `orientRegionInfo`), so a region made from a face
+    undoes that, using the orientation Immich used (the asset's `exifInfo.orientation`). The tests check, for all eight
+    orientations, that Immich's own reading gives back the face. `AppliedToDimensions` is the size Immich measured the
+    face in, turned back to the stored image's way round.
+  - **Other tools' regions are kept:** a region is written back with every field it was read with, including shapes
+    other than rectangles.
 
   How they're kept:
   - **One way, from Immich's faces:** when a face is renamed or removed, its tag and region go.
@@ -383,7 +418,8 @@ every step that only reads, and reports what the others would change.
 - **It never deletes media.** The only files it deletes are orphan sidecars (F11). Deleting media is done through
   Immich's trash, and filing only moves files.
 - **It writes only the fields that have to change.** exiftool runs with `-overwrite_original`, since its `*_original`
-  backups would sync everywhere.
+  backups would sync everywhere. It writes a new file and renames it over the old one, keeping the old one's
+  permissions.
 - **Immich only through its API,** never its database.
 - **Test on copies,** never first on a real archive.
 
@@ -397,18 +433,39 @@ every step that only reads, and reports what the others would change.
 - **One outside dependency: exiftool,** a Perl program, run from the system's install (Debian's
   `libimage-exiftool-perl`). It could be bundled later, by extracting it on first run: Perl can't read files embedded
   in the executable.
+  - **A release uses only the exiftool on the PATH,** and says how to install it when there's none. It never falls back
+    to the copy exiftool-vendored brings: a compiled executable would find that copy by the path it had on the machine
+    that built it, so it would work there and nowhere else. Running from source, that copy stands in when the system
+    has none (`src/sidecars/exiftool.ts`).
+  - **One exiftool process** (`maxProcs: 1`), started after a one-off `exiftool -ver`, since exiftool-vendored retries
+    starting a missing or broken exiftool without end.
+  - **Fields by their group-qualified names** (`XMP-dc:Title`), without MWG's composite tags, so the daemon controls
+    exactly which fields it reads and writes (`src/core/xmp.ts`).
+  - **Text that looks like a number stays as written.** exiftool's JSON leaves out the quotes around such values (a
+    title "1.50" would read as 1.5), so the daemon reads each number as the text exiftool printed. exiftool 12.76
+    (Ubuntu 24.04's) ignores the option that would quote them.
+  - **Checked with** exiftool 12.76 and 13.59 (the copy exiftool-vendored 35.21 brings, the same as Immich 3.3.5's).
+    Debian 13 has 13.25. CI installs Ubuntu's and checks that the executable uses it.
+  - **`media-triage sidecar FILE`** prints what the daemon reads from a sidecar (or from `FILE.xmp`), and what Immich
+    and Darktable each read from it, as JSON. It needs no configuration.
 - **Layout:**
   - `src/main.ts`: the command line;
-  - `src/core/`: the pure rules, without I/O;
+  - `src/core/`: the pure rules, without I/O, including a sidecar's fields and what each tool reads from them
+    (`xmp.ts`) and face regions (`regions.ts`);
   - `src/immich/`: the Immich client: one `ImmichClient` per account's session, wrapping `@immich/sdk` (pinned to the
     server's version), plus the sessions and `login`, assets (`assets.ts`: listing, finding by path, and bulk
     changes), albums, faces and people (`albums.ts`, `faces.ts`, `people.ts`), libraries and users (`libraries.ts`), cluster
     groups (`cluster-groups.ts`), and the sync stream (`sync.ts`, read with `fetch`, since the
     SDK's `getSyncStream` reads the whole response as text);
+  - `src/sidecars/`: exiftool (`exiftool.ts`), the namespace's exiftool config (`namespace.ts`), and reading, writing
+    and creating sidecars (`sidecar.ts`);
   - each module's tests sit beside it (`*.test.ts`).
   - `test/immich/`: a development Immich for the integration tests (`compose.yml`, started and stopped by `dev.ts`),
     and what the tests share (`harness.ts`). Tests that need it are skipped unless `MEDIA_TRIAGE_IMMICH_TESTS=1`;
-  - `test/fixtures/`: small media files with made-up metadata.
+  - `test/fixtures/`: small media files with made-up metadata, and a sidecar each from Darktable and Immich, made by
+    the tools themselves (`make.ts`);
+  - `test/darktable.ts`: Darktable, headless (`xvfb-run`), with a throwaway library, configuration, cache and home
+    folder, to have it rewrite a copy's sidecar. Tests that need it are skipped without it.
 - **Run it on the host, not in a container,** or at least with the inbox and archive in one mount. Filing moves files
   with `link()`, which fails across mounts (`EXDEV`), even between two bind mounts of the same drive.
 - **Releases:** pushing a tag `vX.Y.Z` runs `.github/workflows/release.yml`. It tests, builds both executables, writes
@@ -505,3 +562,7 @@ with what changed, not with the size of the archive.
 - 2026-11-04: sync covers the whole archive, not just the inbox (section 1), and section 13 (scale) added. Section 3
   corrected from Immich 3.3.5's source: `AssetsV2` and `AlbumsV2` instead of the V1 types, the stream carries no
   paths, `AssetFacesV3` covers the cluster group, and resets.
+- 2026-11-04: sidecar I/O built (milestone 5). Found and written down: Immich's own copies of the description and date
+  (F6), Darktable dropping the date's offset (F6), Immich showing Darktable's own tags (F4), and how regions'
+  coordinates relate to Immich's faces (F10). Checked that Immich and Darktable keep the namespace and regions (F9,
+  F10). F9's namespace and its key settled. The author decided F5 isn't needed.

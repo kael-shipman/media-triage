@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -64,4 +64,22 @@ test("run starts, and stops cleanly on SIGTERM", async () => {
   daemon.kill("SIGTERM");
   expect(await daemon.exited).toBe(0);
   expect(statSync(join(dir, "state", "state.sqlite")).isFile()).toBe(true);
+});
+
+test("sidecar prints what's read from a sidecar, given it or its media file", () => {
+  dir = mkdtempSync(join(tmpdir(), "media-triage-"));
+  const fixtures = join(import.meta.dir, "..", "test", "fixtures");
+  copyFileSync(join(fixtures, "darktable.xmp"), join(dir, "photo.jpg.xmp"));
+  for (const file of [join(dir, "photo.jpg"), join(dir, "photo.jpg.xmp")]) {
+    const { status, out } = run("sidecar", file);
+    expect(status).toBe(0);
+    const report = JSON.parse(out);
+    expect(report.sidecar).toBe(join(dir, "photo.jpg.xmp"));
+    expect(report.fields.title).toBe("Lake day");
+    expect(report.darktableReads.tags).toEqual(["People/Robin Example", "Places/Lake"]);
+    expect(report.exiftool.version).toMatch(/^\d+\.\d+/);
+  }
+  const missing = run("sidecar", join(dir, "other.jpg"));
+  expect(missing.status).toBe(1);
+  expect(missing.err).toContain("There's no sidecar");
 });

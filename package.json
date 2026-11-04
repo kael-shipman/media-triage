@@ -20,6 +20,7 @@
   },
   "dependencies": {
     "@immich/sdk": "3.3.5",
+    "exiftool-vendored": "35.21.0",
     "fast-glob": "3.3.2",
     "picomatch": "4.0.7"
   }

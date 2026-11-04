@@ -13,6 +13,9 @@ import { SessionError } from "./immich/sessions.ts";
 import { LEVELS, type Level, log, setLogLevel } from "./log.ts";
 import { defaultConfigPath } from "./paths.ts";
 import { PromptCancelled, readPassword } from "./prompt.ts";
+import { darktableReads, immichReads } from "./core/xmp.ts";
+import { Exiftool, ExiftoolMissing } from "./sidecars/exiftool.ts";
+import { readSidecar } from "./sidecars/sidecar.ts";
 import { openAccounts } from "./upkeep/accounts.ts";
 import { checkLibraries, formatReport } from "./upkeep/check.ts";
 import { UpgradeError, upgrade } from "./upgrade.ts";
@@ -27,6 +30,7 @@ Commands:
   run              Run the daemon
   login ACCOUNT    Log an Immich account in, with its password, and keep the session
   check            Check that each library limited by date holds exactly what its date allows
+  sidecar FILE     Print what media-triage reads from a sidecar: FILE, or FILE.xmp for a media file
   init             Write a starter configuration, unless there's one already
   config           Check the configuration, and print it with the defaults filled in
   upgrade          Upgrade to the newest release the configuration's [upgrade] track allows
@@ -53,13 +57,14 @@ const OPTIONS = {
 } as const;
 
 /** Which arguments each command takes. */
-const COMMAND_ARGUMENTS: Record<string, readonly string[]> = { login: ["ACCOUNT"] };
+const COMMAND_ARGUMENTS: Record<string, readonly string[]> = { login: ["ACCOUNT"], sidecar: ["FILE"] };
 
 /** Which options each command accepts, besides --config, --log-level and --help. */
 const COMMAND_OPTIONS: Record<string, readonly string[]> = {
   run: ["dry-run"],
   login: [],
   check: [],
+  sidecar: [],
   init: [],
   config: [],
   upgrade: ["check", "to"],
@@ -117,6 +122,8 @@ export async function main(argv: string[]): Promise<number> {
         return await loginNow(loadConfig(configFile), args[0]!);
       case "check":
         return await checkNow(loadConfig(configFile));
+      case "sidecar":
+        return await showSidecar(args[0]!);
       case "run": {
         const config = loadConfig(configFile);
         if (!logLevel) setLogLevel(config.log.level);
@@ -125,7 +132,7 @@ export async function main(argv: string[]): Promise<number> {
     }
   } catch (error) {
     if (error instanceof PromptCancelled) return EXIT.error;
-    if (error instanceof ConfigError || error instanceof UpgradeError || error instanceof ImmichError || error instanceof SessionError) {
+    if (error instanceof ConfigError || error instanceof UpgradeError || error instanceof ImmichError || error instanceof SessionError || error instanceof ExiftoolMissing) {
       log.error(error.message);
       return EXIT.error;
     }
@@ -195,6 +202,33 @@ async function checkNow(config: Config): Promise<number> {
   const report = await checkLibraries(config, accounts.open, await listLibraries(admin.client));
   console.log(formatReport(report).join("\n"));
   return report.ok ? EXIT.ok : EXIT.error;
+}
+
+/**
+ * `media-triage sidecar FILE`: the fields the daemon reads from a sidecar, and what Immich and Darktable each read from
+ * them. It needs no configuration, and it's how CI checks that a release finds the system's exiftool.
+ */
+async function showSidecar(file: string): Promise<number> {
+  const path = /\.xmp$/i.test(file) ? file : `${file}.xmp`;
+  const exiftool = await Exiftool.start();
+  try {
+    const sidecar = await readSidecar(exiftool, path);
+    if (!sidecar) {
+      log.error(`There's no sidecar at ${path}`);
+      return EXIT.error;
+    }
+    const report = {
+      sidecar: path,
+      exiftool: { version: exiftool.version, path: exiftool.path, source: exiftool.source },
+      fields: sidecar.fields,
+      immichReads: immichReads(sidecar.fields),
+      darktableReads: darktableReads(sidecar.fields),
+    };
+    console.log(JSON.stringify(report, null, 2));
+    return EXIT.ok;
+  } finally {
+    await exiftool.close();
+  }
 }
 
 async function upgradeNow(config: Config, options: { check: boolean; to?: string }): Promise<number> {

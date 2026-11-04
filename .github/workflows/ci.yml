@@ -13,9 +13,23 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.4
+      # The system's exiftool, as a release uses (Ubuntu's is older than the copy exiftool-vendored brings).
+      - name: Install exiftool
+        run: sudo apt-get update && sudo apt-get install -y libimage-exiftool-perl
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
       - run: bun test
       - run: bun run build
       - name: Check the executable runs
         run: dist/media-triage-linux-x64 version
+      - name: Check the executable reads a sidecar with the system's exiftool
+        run: |
+          dist/media-triage-linux-x64 sidecar test/fixtures/darktable.xmp > sidecar.json
+          cat sidecar.json
+          grep -q '"path": "/usr/bin/exiftool"' sidecar.json
+          grep -q '"title": "Lake day"' sidecar.json
+      - name: Check the executable says how to install exiftool when there's none
+        run: |
+          if PATH=/nonexistent dist/media-triage-linux-x64 sidecar test/fixtures/darktable.xmp 2> error.txt; then exit 1; fi
+          cat error.txt
+          grep -q libimage-exiftool-perl error.txt

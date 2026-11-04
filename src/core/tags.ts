@@ -10,6 +10,14 @@ export function isDarktableInternal(darktableTag: string): boolean {
 }
 
 /**
+ * Darktable's own tags as Immich shows them ("darktable/format/jpg"). Immich reads `lr:hierarchicalSubject` whole when
+ * a sidecar has no `TagsList`, so they reach Immich too, and are left out of the sync there as well.
+ */
+export function isDarktableInternalInImmich(immichTag: string): boolean {
+  return immichTag === "darktable" || immichTag.startsWith("darktable/");
+}
+
+/**
  * Darktable's "Parent|Child" as Immich shows it: the parts joined with "/", with any "/" inside a part turned into
  * "|". That's Immich's own conversion (metadata.service.ts, getTagList), so "Music|AC/DC" is "Music/AC|DC".
  */

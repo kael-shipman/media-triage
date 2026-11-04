@@ -119,15 +119,18 @@ export interface IndexedLibrary {
 /**
  * A new library owned by `owner`, over a fresh media folder holding a copy of the fixture photo under each name,
  * scanned and indexed. Libraries are made with the admin's session; only the owner's session sees the assets.
+ * `prepare` can add to the folder (sidecars, say) before Immich first scans it.
  */
 export async function indexedLibrary(
   prefix: string,
   admin: { token: string },
   owner: { token: string; userId: string },
   names: string[],
+  options: { prepare?: (folder: { local: string; immich: string }) => void | Promise<void> } = {},
 ): Promise<IndexedLibrary> {
   const folder = mediaFolder(prefix);
   for (const name of names) copyFileSync(join(FIXTURES, "photo.jpg"), join(folder.local, name));
+  await options.prepare?.(folder);
   const { id: libraryId } = await api<{ id: string }>("POST", "/libraries", {
     token: admin.token,
     body: { ownerId: owner.userId, name: prefix, importPaths: [folder.immich], exclusionPatterns: [] },
