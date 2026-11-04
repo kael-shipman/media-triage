@@ -248,9 +248,14 @@ are in the sidecar, so they need nothing. The rest is restored once each account
   2. Match the new copy's faces to the old copy's by overlap: an intersection over union above 0.5, as Immich's own
      detection uses (`person.service.ts`, `handleDetectFaces`). The old copy's faces come from the state, including
      deleted ones, which `AssetFacesV3` reports.
-  3. Reassign a face whose person differs (`PUT /api/faces/{id}`).
+  3. Reassign a face whose person differs (`PUT /api/faces/{person}`, with the face's ID in the body: the API's
+     order is the reverse of what its path suggests).
   4. Add a face that was added by hand and has no match (`POST /api/faces`).
-  5. Delete a face that was deleted on the old copy (`DELETE /api/faces/{id}`).
+  5. Delete a face that was deleted on the old copy (`DELETE /api/faces/{id}`, a soft delete, as in Immich's own
+     interface).
+
+  A person's ID in Immich 3.3's API is its person group's: the same in every account of a cluster group, where each
+  account keeps its own record of the person, with its own name.
 
   An Immich server that mirrors face corrections between copies of the same file (the
   [kael-shipman/immich](https://github.com/kael-shipman/immich) fork does) needs the corrections applied to one copy
@@ -329,7 +334,7 @@ or a library.
   - `src/core/`: the pure rules, without I/O;
   - `src/immich/`: the Immich client: one `ImmichClient` per account's session, wrapping `@immich/sdk` (pinned to the
     server's version), plus the sessions and `login`, assets (`assets.ts`: listing, finding by path, and bulk
-    changes), and the sync stream (`sync.ts`, read with `fetch`, since the
+    changes), albums, faces and people (`albums.ts`, `faces.ts`, `people.ts`), and the sync stream (`sync.ts`, read with `fetch`, since the
     SDK's `getSyncStream` reads the whole response as text);
   - each module's tests sit beside it (`*.test.ts`).
   - `test/immich/`: a development Immich for the integration tests (`compose.yml`, started and stopped by `dev.ts`),

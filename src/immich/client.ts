@@ -32,8 +32,18 @@ function deviceHeaders(): Record<string, string> {
 export function toImmichError(error: unknown, what: string, url: string): ImmichError {
   if (error instanceof ImmichError) return error;
   if (isHttpError(error)) {
-    const detail = error.data?.message ?? error.message;
-    return new ImmichError(`${what}: Immich answered ${error.status}: ${Array.isArray(detail) ? detail.join("; ") : detail}`, error.status);
+    // Calls that return no body read errors as text, so the data may still be JSON in a string.
+    let data: unknown = error.data;
+    if (typeof data === "string") {
+      try {
+        data = JSON.parse(data);
+      } catch {
+        // plain text
+      }
+    }
+    const message = typeof data === "object" && data !== null ? (data as { message?: unknown }).message : data;
+    const detail = Array.isArray(message) ? message.join("; ") : typeof message === "string" && message !== "" ? message : error.message;
+    return new ImmichError(`${what}: Immich answered ${error.status}: ${detail}`, error.status);
   }
   return new ImmichError(`${what}: couldn't reach Immich at ${url}: ${(error as Error).message}`, 0);
 }

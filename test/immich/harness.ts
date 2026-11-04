@@ -7,7 +7,7 @@
 //   bun test/immich/dev.ts down
 
 import { describe } from "bun:test";
-import { mkdirSync, mkdtempSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync } from "node:fs";
 import { join, relative } from "node:path";
 import { type Config, parseConfig } from "../../src/config.ts";
 
@@ -94,4 +94,40 @@ export function testConfig(stateDir: string): Config {
     },
     null,
   );
+}
+
+export interface IndexedLibrary {
+  libraryId: string;
+  folder: { local: string; immich: string };
+  /** The library's assets by file name. */
+  assets: Record<string, { id: string; originalPath: string }>;
+}
+
+/**
+ * A new library owned by `owner`, over a fresh media folder holding a copy of the fixture photo under each name,
+ * scanned and indexed. Libraries are made with the admin's session; only the owner's session sees the assets.
+ */
+export async function indexedLibrary(
+  prefix: string,
+  admin: { token: string },
+  owner: { token: string; userId: string },
+  names: string[],
+): Promise<IndexedLibrary> {
+  const folder = mediaFolder(prefix);
+  for (const name of names) copyFileSync(join(FIXTURES, "photo.jpg"), join(folder.local, name));
+  const { id: libraryId } = await api<{ id: string }>("POST", "/libraries", {
+    token: admin.token,
+    body: { ownerId: owner.userId, name: prefix, importPaths: [folder.immich], exclusionPatterns: [] },
+  });
+  await api("POST", `/libraries/${libraryId}/scan`, { token: admin.token });
+  type Found = { id: string; originalPath: string; originalFileName: string; exifInfo?: { dateTimeOriginal?: string } };
+  const assets = await waitFor(`the scan of ${prefix}`, async () => {
+    const { assets } = await api<{ assets: { items: Found[] } }>("POST", "/search/metadata", {
+      token: owner.token,
+      body: { filter: { libraryId: { eq: libraryId } }, withExif: true, size: 1000 },
+    });
+    const indexed = assets.items.length === names.length && assets.items.every((asset) => asset.exifInfo?.dateTimeOriginal);
+    return indexed ? assets.items : undefined;
+  });
+  return { libraryId, folder, assets: Object.fromEntries(assets.map((asset) => [asset.originalFileName, { id: asset.id, originalPath: asset.originalPath }])) };
 }

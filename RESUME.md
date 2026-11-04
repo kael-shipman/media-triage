@@ -65,7 +65,16 @@ session stops partway.
     missing one without the PIN;
   - a missing file becomes offline **and** trashed, and both clear when it's back (the F8 question below);
   - `refresh-metadata` ignores a sidecar that appeared after indexing (the F1 question below).
-- **Tests:** 237 without Immich, all passing (`npx bun@1.4.4 test`), and 255 with the development Immich
+- **Albums, faces and people** (milestone 3, step 2): `albums.ts` (list, create, add and remove in bulk; adding twice
+  or removing what isn't there is fine), `faces.ts` (read, add by hand, reassign, soft delete), `people.ts` (list,
+  create, rename in bulk, share all, list shares). Found and handled:
+  - the face reassign call is `PUT /faces/{person}` with the face's ID in the body (DESIGN.md section 7 corrected);
+  - a person's API ID is its person group's, the same in every account of a cluster group;
+  - `GET /people` lists only people with a visible face on the account's assets;
+  - sharing people needs both accounts in one cluster group (tested as a refusal for now; the working case comes with
+    the cluster-group calls);
+  - the SDK reads errors from calls without a response body as text; `toImmichError` now parses them.
+- **Tests:** 238 without Immich, all passing (`npx bun@1.4.4 test`), and 261 with the development Immich
   (`MEDIA_TRIAGE_IMMICH_TESTS=1`). The type check is clean, and covers `test/` too.
 - **Design updated 2026-11-04** (approved by the author): sync covers the whole archive, not just the inbox, and a
   new section 13 (scale) says how that stays cheap. Section 3 corrected from 3.3.5's source: `AssetsV2` and
@@ -75,16 +84,17 @@ session stops partway.
 ## Next
 
 **Exactly what to do next:** milestone 3, the Immich client, from step 2. Steps 1 and 2's login and sync stream are done:
-`bun run immich up`, then `MEDIA_TRIAGE_IMMICH_TESTS=1 bun test`. The asset calls and the path map are done. Next are the
-album, face, people, library and cluster-group calls, each in bulk where the API allows (DESIGN.md, section 13).
+`bun run immich up`, then `MEDIA_TRIAGE_IMMICH_TESTS=1 bun test`. The asset, album, face and people calls and the path map are
+done. Next are the library, user and cluster-group calls, which finish milestone 3.
 1. [x] **A development Immich** for integration tests (`test/immich/`).
 2. **`src/immich/`:** wrap what the daemon needs:
    - [x] login and sessions, and `media-triage login <account>`;
    - [x] the sync stream (`POST /sync/stream`, JSON lines) and acknowledgements (`POST /sync/ack`);
    - [x] assets by original path, metadata refresh (the asset jobs endpoint), trash and restore, favorite and
      visibility;
-   - **next:** albums, faces (`GET`/`POST`/`PUT`/`DELETE /faces`), people and people sharing, libraries
-     (create, update exclusion patterns, scan), and cluster groups (invite, accept).
+   - [x] albums, faces (`GET`/`POST`/`PUT`/`DELETE /faces`), people and people sharing;
+   - **next:** libraries (create, update exclusion patterns, scan), users (to find account IDs), and cluster groups
+     (invite, accept), with a test that shares people between two accounts in one group.
 3. [x] **The path map:** translate between Immich's paths and local ones, both ways (`immich.path_map`).
 
 Check each call's request and response shapes in the SDK; the server's `/api/spec` is the reference.
