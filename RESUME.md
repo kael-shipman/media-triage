@@ -1,197 +1,175 @@
 # Resume here
 
 The handoff for whoever works on media-triage next, person or agent. Start with the [README](README.md) (what it's
-for) and [docs/DESIGN.md](docs/DESIGN.md) (how it works).
+for) and [docs/DESIGN.md](docs/DESIGN.md) (how it works, and why). DESIGN.md is the source of truth: if something
+you're about to build would change it, ask the author first.
 
 **Update this file after every completed step,** not just at the end of a session, so work can be picked up if a
-session stops partway.
+session stops partway. Each step ends with tests passing, the type check clean, a commit and a push; CI must stay
+green.
 
-**Last updated:** 2026-11-04.
+**Last updated:** 2026-11-04. Milestones 1–4 of 8 are done. **Next: milestone 5, then 6.**
+
+## Working on it
+
+- **Bun 1.4** runs and builds it. Without Bun installed, `npx --yes bun@1.4.4` stands in for `bun`:
+  - `bun test`: the unit tests (262), and the integration tests, skipped;
+  - `bun run typecheck`: TypeScript, over `src/`, `scripts/` and `test/`;
+  - `bun run build [version]`: executables for linux-x64 and linux-arm64 in `dist/` (`TARGETS=linux-x64` for one).
+- **The development Immich** (`test/immich/`): upstream's 3.3.5 stack in Docker Compose, without machine learning, on
+  `127.0.0.1:2284`, with made-up users (`alex@example.com`, the admin, and `sam@example.com`).
+  - `bun run immich up` starts it (about a minute) and `bun run immich down` deletes everything. Leave it down when
+    you stop: its database is in memory anyway.
+  - `MEDIA_TRIAGE_IMMICH_TESTS=1 bun test` runs everything against it (301 tests). Run it twice in a row on one
+    instance before calling a step done: tests must not depend on what other tests left behind.
+  - Shared test helpers are in `test/immich/harness.ts`: `describeImmich`, `mediaFolder`, `photos`,
+    `indexedLibrary`, `newUser` (fresh users, for anything that changes an account for good, such as joining a
+    cluster group), `configFor`, `api`, `waitFor`.
+- **Immich's source**, for checking behavior: the fork's clone at `~/Desktop/tmp-repos/immich`, branch `twins`, based
+  on v3.3.5. Look in `server/src`: `controllers/`, `dtos/`, `services/`, `repositories/`. Use Immich only through
+  its API, never its database.
+- **Releases:** `v0.1.0-rc.1` and `rc.2` exist, from milestone 1 only. Don't tag a release without the author.
 
 ## Where things stand
 
-- **Built:** the command line (`help`, `version`, `init`, `config`, `run`, `login`, `check`, `upgrade`), the TOML
-  configuration with every setting checked (unknown keys are errors), the state database with numbered migrations,
-  the job scheduler (one job at a time), and logging (journal priorities under systemd).
-- **Upgrades:** `media-triage upgrade` (`--check`, `--to`), and the daemon's scheduled check, which exits with
-  status 75 after upgrading so systemd restarts it. Tested against a fake release server; the daemon's own path still
-  needs the end-to-end check in step 5, with real executables.
-- **The installer,** `install.sh`: picks the release, checks its hash and its `version`, installs into `~/.local/bin`,
-  runs `init`, and optionally writes and enables a user or system systemd unit. Tested with dash against a fake
-  release server, with `systemctl` stubbed. shellcheck is clean (`npx shellcheck -s sh install.sh`).
-- **Builds:** `bun run build [version]` makes `dist/media-triage-linux-{x64,arm64}` (about 110 MB each) and
-  `SHA256SUMS`. Checked: the executable reports its version, knows it's compiled, and embeds the example config.
-- **Workflows:** `ci.yml` (every push and pull request: type check, tests, build) and `release.yml` (`v*` tags:
-  the same, then a GitHub release). Both pass on GitHub.
-- **Releases:** `v0.1.0-rc.1` and `v0.1.0-rc.2`, pre-releases made for the end-to-end check: the foundation only, no
-  triage yet.
-- **End-to-end check, passed 2026-11-03:** installed rc.1 with `curl … install.sh | sh` into a sandbox, ran its
-  daemon with `prerelease = true`, and it upgraded itself to rc.2 a minute later and exited with 75. Started again,
-  it ran rc.2 and scheduled its next check six hours out.
-- **The pure rules** (`src/core/`, milestone 2):
-  - `tags.ts`: translating tags between the tools, `dc:subject`, and the three-way merge (F4);
-  - `titles.ts`: the `Title/…` tag and what a title may hold (F3);
-  - `naming.ts`: filing names exactly like the Darktable preset, wall times from EXIF, collision numbers shared by a
-    Live Photo's two files;
-  - `folder-dates.ts` and `exclusions.ts`: which names a date-limited library allows, and the exclusion patterns
-    for it, checked against picomatch and fast-glob by fuzzing and a real crawl (about 44 patterns per level);
-  - `orphans.ts`: which media file a sidecar belongs to, Darktable duplicates included (F11).
-- **A development Immich** (milestone 3, step 1): `test/immich/compose.yml`, upstream's v3.3.5 stack without machine
-  learning, on `127.0.0.1:2284`, the server running as the developer's user, the database in memory. `bun run immich
-  up` starts it and creates two made-up users (the admin `alex@example.com`, and `sam@example.com`), and turns off
-  machine learning and the version check; `down` deletes everything. `harness.ts` holds what tests share
-  (`describeImmich`, `mediaFolder`, `api`, `waitFor`). A smoke test checks that a library over the media folder indexes
-  `test/fixtures/photo.jpg` at Immich's path, with its EXIF date. Starting takes about a minute (the images are
-  cached after the first pull).
-- **`run` starts and stops cleanly. Its jobs so far are the upgrade check and account upkeep.**
-- **Login and sessions** (milestone 3, step 2): `src/immich/client.ts` (`ImmichClient`: one account's session, every
-  SDK call made with its own options, errors as `ImmichError` with the HTTP status), `sessions.ts` (session files,
-  mode 600, refused if others can read them), `login.ts`, and `media-triage login <account>` (no echo on a terminal,
-  first line of stdin otherwise; logging in again ends the old session). `@immich/sdk` is pinned at 3.3.5. Checked
-  by hand through a pseudo-terminal, and with the compiled executable.
-- **The sync stream** (milestone 3, step 2): `src/immich/sync.ts`. `syncStream(client)` asks for DESIGN.md
-  section 3's types, reads the response line by line (`jsonLines`), and yields batches of up to 1,000 changes, each
-  with the acks to send after acting on it (`acknowledge`): the last of each type. A reset arrives as a batch of its
-  own (`reset: true`). Also `checkpoints` and `forgetCheckpoints`. Tested against the development Immich: a first full
-  read, nothing after acknowledging, favorite, trash, album, person and face changes, a forced reset, and the
-  `AssetsV1` refusal. Immich's own jobs update a person shortly after a face is added, so the stream reports the
-  person again; tests wait for those jobs.
-- **Assets and the path map** (milestone 3, steps 2 and 3): `src/immich/assets.ts`: `libraryPages` and
-  `searchPages` (structured search, pages of 1,000), `findByPaths` (500 paths a search), `getAsset`, and bulk
-  `refreshMetadata`, `trashAssets`, `restoreAssets`, `setFavorite`, `setVisibility` (1,000 IDs a request; Immich's body
-  limit is above 4 MB). `src/core/path-map.ts`: Immich's paths to local ones and back, longest folder first. Tested
-  against the development Immich, which also showed:
-  - searches include trashed, archived, hidden and offline assets, but not locked ones; a locked asset reads like a
-    missing one without the PIN;
-  - a missing file becomes offline **and** trashed, and both clear when it's back (F8, decided below);
-  - `refresh-metadata` ignores a sidecar that appeared after indexing (F1, decided below).
-- **Albums, faces and people** (milestone 3, step 2): `albums.ts` (list, create, add and remove in bulk; adding twice
-  or removing what isn't there is fine), `faces.ts` (read, add by hand, reassign, soft delete), `people.ts` (list,
-  create, rename in bulk, share all, list shares). Found and handled:
-  - the face reassign call is `PUT /faces/{person}` with the face's ID in the body (DESIGN.md section 7 corrected);
-  - a person's API ID is its person group's, the same in every account of a cluster group;
-  - `GET /people` lists only people with a visible face on the account's assets;
-  - sharing people needs both accounts in one cluster group (tested as a refusal for now; the working case comes with
-    the cluster-group calls);
-  - the SDK reads errors from calls without a response body as text; `toImmichError` now parses them.
-- **Libraries, users and cluster groups** (milestone 3, step 2): `libraries.ts` (list, create, update, scan,
-  statistics, validate folders, list users; lists Immich would refuse are refused first, naming the library) and
-  `cluster-groups.ts` (the account's group, members, invite, invitations, accept; "reset facial recognition" is
-  deliberately not wrapped). Checked against the development Immich: two accounts' libraries over the same folder each
-  get their own assets; an account that joins a group keeps its named people; sharing people works once both are in
-  one group.
-- **Milestone 3 is done** (2026-11-04).
-- **Milestone 4, step A (pure rules):** `src/core/libraries.ts` (each library's wanted state, and the plan against
-  Immich's: create, update only what differs, report the unconfigured, refuse duplicates and too many patterns) and
-  `classifyPath` in `src/core/folder-dates.ts` (allowed, rejected and why, or outside every dated level), checked
-  against a real fast-glob crawl with the generated patterns. That crawl showed a dotted folder above a dated level
-  (`Videos/My.Clips`) isn't excluded, contrary to what DESIGN.md said; corrected.
-- **Milestone 4, step B:** `src/upkeep/accounts.ts` (`openAccounts`: each account's session, checked, or a problem
-  saying what to do) and `src/upkeep/cluster.ts` (`joinClusterGroup`: invite from the first account, accept with the
-  joiner's session, re-read to confirm; `--dry-run` only reports). Tested with fresh users.
-- **Milestone 4, step C:** `src/upkeep/libraries.ts` (`upkeepLibraries`: owners by email from the admin's user
-  list, the plan, create only for accounts in the group, correct, scan what changed, report the unconfigured) and
-  `waitForLibraryQueue` in `src/immich/libraries.ts`. Tested end to end: a date-limited library indexes exactly the
-  allowed files, and moving its cutover takes the newly excluded ones out.
-- **Milestone 4, step D:** `src/upkeep/check.ts` and `media-triage check`. Tested against the development Immich: a
-  correct library passes; leaked assets fail, and still fail once offline in the trash; patterns that leave out an
-  allowed folder show its files as missing; a wrong path map is a failure, not a pass. Found on the way: matching the
-  hidden-file patterns against local paths inside a hidden folder (such as `~/.media/archive`) excluded
-  everything, so exclusions are matched against Immich's paths. `fast-glob` and `picomatch` are runtime dependencies
-  now (pinned, as Immich uses them); `src/core/media.ts` lists Immich's extensions.
-- **Milestone 4, step E:** `src/upkeep/people.ts` (`upkeepPeople`: share all both ways with write access every pass,
-  then copy names onto records still unnamed; conflicts reported) and `getPerson`. Found in 3.3.5: renames already
-  reach the records shared with write access, new records for a shared person start with its name, and the people
-  list hides unnamed people with fewer than 3 faces (so those records are read one by one).
-- **Cleanup:** milestone 2's tests held a real date, a real person's name and real folder names; replaced with
-  made-up ones (`7b4143a`). They remain in the repository's history.
-- **Milestone 4, step F:** `src/upkeep/upkeep.ts` (`runUpkeep`, in order, and the daemon's `upkeep` job, at start and
-  every full pass; retried in 5 minutes if Immich can't be reached, via a new `nextInMs` a scheduler run can return;
-  stopping aborts its wait for scans). Tested end to end, including the daemon running it in a dry run.
-- **Milestone 4 is done** (2026-11-04).
-- **Tests:** 262 without Immich, all passing (`npx bun@1.4.4 test`), and 301 with the development Immich
-  (`MEDIA_TRIAGE_IMMICH_TESTS=1`). The type check is clean, and covers `test/` too.
-- **Design updated 2026-11-04** (approved by the author): sync covers the whole archive, not just the inbox, and a
-  new section 13 (scale) says how that stays cheap. Section 3 corrected from 3.3.5's source: `AssetsV2` and
-  `AlbumsV2` (3.3.5 refuses `AssetsV1`), no paths in the stream (looked up once per asset, in bulk where there are
-  many), `AssetFacesV3` covers the cluster group, and `SyncResetV1`.
+| What | Where | Milestone |
+|---|---|---|
+| Command line: `help`, `version`, `init`, `config`, `run`, `login`, `check`, `upgrade` | `src/cli.ts` | 1, 3, 4 |
+| Configuration (TOML, every setting checked), state database (numbered migrations), scheduler (one job at a time; a run can ask to run again sooner), logging | `src/config.ts`, `state.ts`, `scheduler.ts`, `log.ts` | 1 |
+| Self-upgrade, installer, CI and releases, checked end to end with two pre-releases | `src/upgrade.ts`, `install.sh`, `.github/workflows/` | 1 |
+| The pure rules: tags (F4), titles (F3), filing names (section 7), date limits and their exclusion patterns, path classification, orphans (F11), the path map, the library plan, Immich's extensions | `src/core/` | 2, 3, 4 |
+| The Immich client: sessions and `login`, the sync stream, assets, albums, faces, people, libraries, cluster groups | `src/immich/` | 3 |
+| Account upkeep, at start and every full pass: accounts, the cluster group, libraries, the check, people | `src/upkeep/` | 4 |
 
-## Next
+**The daemon's jobs so far:** the upgrade check, and account upkeep. Nothing reads or writes sidecars yet, and
+nothing syncs or files.
 
-**Exactly what to do next:** milestone 5, sidecar I/O. Milestone 4, account upkeep, is done: `src/upkeep/` runs at
-start and on every full pass (accounts, cluster group, libraries, scans, the check, people), and `media-triage check`
-runs the check on demand. Everything is tested against the development Immich (`bun run immich up`, then
-`MEDIA_TRIAGE_IMMICH_TESTS=1 bun test`).
+**Found in Immich 3.3.5 while building milestones 3 and 4** (each is in DESIGN.md, and each has a test):
+- the sync stream refuses `AssetsV1` (use `AssetsV2`), carries no paths, and `AssetFacesV3` covers the whole cluster
+  group;
+- searches leave out locked assets, and a locked asset reads like a missing one without the account's PIN;
+- a library file that goes offline is also marked trashed, and coming back clears both;
+- `refresh-metadata` never reads a sidecar that appeared after Immich indexed the file;
+- the face reassign call is `PUT /faces/{person}` with the face's ID in the body;
+- a person's API ID is its person group's, the same in every account of a cluster group; renames reach the records
+  shared with write access; `GET /people` hides unnamed people with fewer than 3 faces;
+- two accounts' libraries can index the same folder; joining a cluster group keeps an account's named people.
 
-Milestone 5 (DESIGN.md, sections 6 and 10):
-1. **exiftool:** add `exiftool-vendored`, run as one long-lived process (section 13), with `-overwrite_original`
-   (section 9). DESIGN.md says the executable uses the system's exiftool (Perl can't read files embedded in it). This
-   machine has no system exiftool, but `exiftool-vendored` brings its own for Linux (it needs Perl, which is here), so
-   tests can use that; the executable must find the system's (`libimage-exiftool-perl`) and say so if it's missing.
-2. **Reading and writing a sidecar's fields:** rating, `dc:title`, `dc:description`, `dc:creator`, `dc:subject`,
-   `lr:hierarchicalSubject`, `digiKam:TagsList`, dates, GPS, and `x:xmptk` (who wrote last, F5). Write only the fields
-   that change.
-3. **Minimal sidecars** for F2 (`<file>.<ext>.xmp`, with the creator).
-4. **The daemon's own namespace** (F9: favorite, visibility, album memberships, per account), with the exiftool
-   config that defines it; check that a sidecar written by Immich (exiftool) and by Darktable (Exiv2) keeps it.
-5. **Face regions** (F10: `mwg-rs:Regions`, the box and the name).
-6. **Fixtures:** a Darktable sidecar and an Immich one, made up, with no personal data; `src/core/` already has the
-   tag and title rules to apply to them.
+## Decided by the author, 2026-11-04
 
-**Decided by the author, 2026-11-04** (DESIGN.md has each; they shape milestone 6):
-- **F1, sidecars Immich never reads:** a metadata refresh re-reads only a sidecar Immich already knows, so a sidecar
-  that appeared after indexing (F2's, or Darktable's first) is never read on stock Immich. **Fixed in the fork,** not
-  worked around here: its `refresh-metadata` will look for a sidecar first (`asset.service.ts`, `run`: queue
-  `SidecarCheck`, whose follow-up job is the extraction). That patch belongs to the fork's track and isn't written yet
-  (the project's task 0058). Here, milestone 6 adds a setting, like `mirrors_face_corrections`, saying whether the
-  server has the fix.
-- **F8, offline isn't trash:** a trash or restore is mirrored only after reading, through the API, that the copy it
-  happened to isn't offline. Going offline and coming back online are never mirrored.
-- **The covered folders:** what the daemon watches and passes over is every configured library's folders (mapped to
-  local paths) plus the inbox's sources, not everything under `paths.archive`, which is only where filing puts files.
+These shape milestone 6; DESIGN.md has each.
+- **F1, sidecars Immich never reads:** fixed in the author's Immich fork, not worked around here. The fork's
+  `refresh-metadata` will look for a sidecar first. That patch belongs to the fork's track and **isn't written yet**
+  (the project's task 0058); it's needed before sync goes live, not to build it. Milestone 6 adds a setting, like
+  `mirrors_face_corrections`, saying whether the server has the fix.
+- **F8, offline isn't trash:** a trash or restore is mirrored only after reading through the API (`getAsset`,
+  `isOffline`) that the copy it happened to isn't offline. Going offline and coming back online are never mirrored.
+- **The covered folders:** the daemon watches and passes over every configured library's folders (mapped to local
+  paths) plus the inbox's sources, not everything under `paths.archive`, which is only where filing puts files.
+- **The check moves out of upkeep** when sync is built (milestone 6, step 1 below).
 
-**Before sync is built (milestone 6): upkeep holds up every other job while it waits for scans.** The scheduler runs
-one job at a time, on purpose, so that nothing runs in the middle of anything else. Upkeep is one job. When it has
-created or changed a library, it starts Immich's scans and then waits, up to 30 minutes, for them to finish, so that
-the check sees the result. Today the only other job is the upgrade check, so nothing is lost. Once sync and filing
-are jobs too, they'd stand still during that wait: a rating made on a phone wouldn't reach the other account until
-the scans were done. The wait happens only on passes that changed a library (the first run, or after a change to the
-configuration), but the first scan of a whole archive library on a small server can take longer than 30 minutes, and
-then the check also slips to the next full pass, a day later. The fix, when sync exists: upkeep starts the scans and
-ends, and the check becomes its own job, run when Immich's library queue is next idle.
+## Next: milestone 5, sidecar I/O
+
+DESIGN.md sections 6, 9, 10 and 13. A new module, `src/sidecars/` (or similar), with its tests beside it.
+
+1. **exiftool.** Add `exiftool-vendored`, run as one long-lived process (section 13), always with
+   `-overwrite_original` (section 9: `*_original` backups would sync everywhere). Immich 3.3.5 uses `exiftool-vendored`
+   35.21.0 (the latest is 39.1.0); prefer the same major unless there's a reason.
+   - **The executable uses the system's exiftool** (Debian's `libimage-exiftool-perl`; section 10), because the Perl
+     script `exiftool-vendored` brings can't run from inside a Bun-compiled executable. Pass its path explicitly, and
+     report clearly when it's missing.
+   - **This machine has no system exiftool**, but has Perl, so tests can use the one `exiftool-vendored` brings.
+     Check early that the compiled executable finds the system's (CI's runner can `apt-get install
+     libimage-exiftool-perl`).
+2. **Reading and writing a sidecar's fields:** `xmp:Rating`, `dc:title`, `dc:description`, `dc:creator`,
+   `dc:subject`, `lr:hierarchicalSubject`, `digiKam:TagsList`, `exif:DateTimeOriginal`, GPS, and `x:xmptk` (who wrote
+   last, F5). Write only the fields that change, and stat the file again just before writing (section 5, step 3).
+   `src/core/tags.ts` and `titles.ts` already have the rules to apply.
+3. **Minimal sidecars** for F2: `<file>.<ext>.xmp` with only `dc:creator`.
+4. **The daemon's own namespace** (F9): each account's favorite, visibility and album memberships, with the exiftool
+   config that defines it. Then check, on copies, that both other writers keep it:
+   - **Immich:** a sidecar Immich rewrites (rate the photo through the API in the development Immich, which writes
+     the sidecar with its own exiftool, then read it back);
+   - **Darktable:** 5.6.1 is installed here (`darktable`, `darktable-cli`). Work out how to have it rewrite a copy's
+     sidecar (not checked yet: perhaps importing the copy, or Lua), always with a throwaway library and config folder
+     (`--library :memory: --configdir <temporary folder>`), never the author's own (`~/.config/darktable`).
+
+   If either drops the namespace, stop and tell the author: F9 depends on it.
+5. **Face regions** (F10): `mwg-rs:Regions`, each with its box and name, in MWG's normalized coordinates.
+6. **Fixtures** in `test/fixtures/`: a Darktable sidecar and an Immich one, made up from the shapes DESIGN.md
+   describes, with no personal data (made-up names, made-up dates). A tiny photo with a made-up EXIF date is made with
+   Python's Pillow (see the existing `photo.jpg` and `photo-2019.jpg`).
+
+## Then: milestone 6, sync
+
+DESIGN.md sections 3, 5 and 6 (F1–F8) and 13. Read "Decided by the author" above first.
+
+1. **First, take the check out of upkeep.** Upkeep is one scheduler job, and the scheduler runs one job at a time.
+   After changing a library, upkeep waits up to 30 minutes for Immich's scans so the check sees the result, and
+   nothing else runs meanwhile. With sync running, that would hold up every sync for the wait. So: upkeep starts the
+   scans and ends; the check becomes its own job, run when Immich's library queue is next idle
+   (`libraryQueueIdle`). Update DESIGN.md section 8, which describes the wait.
+2. **State:** each asset's ID, owner, library and path (the sync stream has no paths; look up new ones in bulk with
+   `libraryPages` on a first run, after a reset, or when a batch has many new assets, and one by one with `getAsset`
+   otherwise), and each unit's last-synced record (section 5), with the sidecar's size and mtime. New tables are new
+   migrations in `src/state.ts`; never edit a released one.
+3. **The watcher:** inotify over the covered folders, a watch per folder, with the `fs.inotify.max_user_watches`
+   check (section 13). The full pass stats files and reads only sidecars that changed.
+4. **The sync stream consumer**, per account: `syncStream` gives batches; act on a batch, then `acknowledge` its
+   acks. A batch with `reset` is acknowledged and followed by a full read. `AssetFacesV3` reports other accounts'
+   faces too (cluster group). Immich's own jobs touch a person again shortly after a face is added; the
+   last-synced comparison makes that a no-op.
+5. **The reconcile loop** (section 5) and F1–F8, with the merge from `src/core/tags.ts`. Each copy's tags come from
+   `getAsset` (`tags`). Writes to Immich in bulk (`refreshMetadata`, `trashAssets`, `restoreAssets`).
+6. **F1's setting** (whether the server reads new sidecars on refresh), and F8's offline check.
+
+Before anything runs against the author's real files: a dry run over everything, and the author's approval of the
+first live write (DESIGN.md section 9).
+
+## Gotchas
+
+- **picomatch reads `[!…]` as a literal "!"**, not a negation: write negated brackets as `[^…]`.
+- **`Bun.spawnSync` blocks the event loop.** A child process that calls a `Bun.serve` running in the same test
+  process deadlocks. Use `Bun.spawn` and await it.
+- **`pkill -f <pattern>` can match your own shell command** and kill it.
+- **`expect(promise).rejects` must be awaited**, or a failure can go unnoticed.
+- **Paths in tests:** this repository is under a hidden folder on the author's machine, so anything that matches
+  exclusion patterns must match Immich's paths, never local ones (the check's crawl does; see `src/upkeep/check.ts`).
+- **Immich lowercases emails;** `newUser` makes lowercase ones.
+- **The development Immich is shared by every test file:** other tests' libraries and people are there too. Filter
+  by your own IDs, and use fresh users for anything that changes an account for good.
+- **Immich's background jobs run after API calls return** (thumbnails, a person's face): wait for them (`waitFor`)
+  before asserting there's nothing new.
 
 ## Milestones
 
-Each step ends with tests passing, a commit, and this file updated.
-
-**1. Foundation**
+**1. Foundation**, done 2026-11-03
 1. [x] Repository, README, design, RESUME.
-2. [x] Command line (`help`, `version`, `init`, `config`, `run`), TOML configuration with validation, state database
-   (`bun:sqlite`), logging.
-3. [x] Upgrades (`upgrade`, and the daemon's scheduled check), tested against a local fake release server.
+2. [x] Command line, TOML configuration with validation, state database (`bun:sqlite`), logging.
+3. [x] Upgrades (`upgrade`, and the daemon's scheduled check).
 4. [x] The installer (`install.sh`).
-5. [x] CI (`.github/workflows/ci.yml`) and releases (`release.yml`); a first pre-release to try the installer and an
-   upgrade end to end.
+5. [x] CI and releases; pre-releases to try the installer and an upgrade end to end.
 
-**2. The pure rules** (`src/core/`, no I/O)
-1. [x] Tags: translation between the tools, `dc:subject`, three-way merge (F4).
-2. [x] Titles (F3).
-3. [x] Filing names and collisions (section 7).
-4. [x] Folder dates and exclusion patterns, tested against picomatch and fast-glob (section 8).
-5. [x] Orphan sidecars: which media file a sidecar belongs to (F11).
+**2. The pure rules** (`src/core/`), done 2026-11-03
+1. [x] Tags (F4). 2. [x] Titles (F3). 3. [x] Filing names (section 7). 4. [x] Folder dates and exclusion patterns
+(section 8). 5. [x] Orphan sidecars (F11).
 
 **3. Immich client** (`src/immich/`), done 2026-11-04
 1. [x] A development Immich for the integration tests (`test/immich/`).
 2. [x] Login and sessions, the sync stream, and the asset, album, face, people, library and cluster-group calls.
 3. [x] The path map (`src/core/path-map.ts`).
 
-**4. Account upkeep** (section 8, `src/upkeep/`), done 2026-11-04: libraries, exclusion patterns, `check`, cluster
-group, people.
+**4. Account upkeep** (section 8, `src/upkeep/`), done 2026-11-04
+1. [x] The library plan and path classification (`src/core/`).
+2. [x] Accounts and the cluster group.
+3. [x] Libraries: create, correct, scan.
+4. [x] `media-triage check`.
+5. [x] People: shared both ways, names copied.
+6. [x] The daemon's upkeep job.
 
-**5. Sidecar I/O:** exiftool through `exiftool-vendored`: read and write the fields, create minimal sidecars, the
-custom namespace (F9), face regions (F10). Fixtures: a Darktable sidecar, an Immich one.
+**5. Sidecar I/O:** exiftool, the fields, minimal sidecars, the custom namespace (F9), face regions (F10), fixtures.
 
-**6. Sync:** the file watcher, dirty units, the reconcile loop (section 5), F1–F8.
+**6. Sync:** the check as its own job, state, the watcher, the sync stream consumer, the reconcile loop, F1–F8.
 
 **7. F9–F11:** Immich-only state, named faces, orphan sidecars.
 
@@ -199,7 +177,12 @@ custom namespace (F9), face regions (F10). Fixtures: a Darktable sidecar, an Imm
 
 ## Rules
 
-- **No personal data in this repository:** no names, emails, addresses or paths from a real setup. Examples use
-  made-up ones.
+- **No personal data in this repository:** it's public. No real names, emails, addresses, home paths, server names
+  or real dates from the author's setup. Examples and tests use made-up ones (Alex Example, Sam Example, 2020-06-15).
+  Milestone 2 once held real ones; they were replaced on 2026-11-04 but remain in git history, which only the author
+  may decide to rewrite.
 - **Docs are part of done:** the README, DESIGN.md and this file stay current with the code.
-- **Never test against a real archive first.** Use copies.
+- **Never test against a real archive first.** Use copies. Never delete or move real media.
+- **The author's other systems are off limits** unless asked: their server, their `~/Setup` (no git, syncs to every
+  machine including a public one, so it must never hold secrets), and the Immich fork's track, which waits on the
+  author's review.
