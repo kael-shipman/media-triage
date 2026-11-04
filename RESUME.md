@@ -10,11 +10,19 @@ session stops partway.
 
 ## Where things stand
 
-- The repository exists, with its README, design and this file. No code yet.
+- **Built:** the command line (`help`, `version`, `init`, `config`, `run`), the TOML configuration with every setting
+  checked (unknown keys are errors), the state database with numbered migrations, the job scheduler (one job at a
+  time), and logging (journal priorities under systemd).
+- **`run` starts and stops cleanly, but has no jobs yet.**
+- **Tests:** 54, all passing (`npx bun@1.4.4 test`), and the type check is clean.
 
 ## Next
 
-**Exactly what to do next:** milestone 1, step 2 (below): the command line, configuration, state and logging.
+**Exactly what to do next:** milestone 1, step 3: upgrades. `src/upgrade.ts` picks a release (GitHub's releases API,
+by `track` and `prerelease`), downloads `media-triage-<os>-<arch>` and `SHA256SUMS`, checks the hash, runs the new
+executable's `version`, and swaps it in (DESIGN.md, section 11). Add the `upgrade` command (`--check`, `--to`) and
+the daemon's scheduled check (exit 75 to restart). Test it against a fake release server (`Bun.serve`) with a
+shell-script "executable".
 
 ## Milestones
 
@@ -22,7 +30,7 @@ Each step ends with tests passing, a commit, and this file updated.
 
 **1. Foundation**
 1. [x] Repository, README, design, RESUME.
-2. [ ] Command line (`help`, `version`, `init`, `config`, `run`), TOML configuration with validation, state database
+2. [x] Command line (`help`, `version`, `init`, `config`, `run`), TOML configuration with validation, state database
    (`bun:sqlite`), logging.
 3. [ ] Upgrades (`upgrade`, and the daemon's scheduled check), tested against a local fake release server.
 4. [ ] The installer (`install.sh`).
