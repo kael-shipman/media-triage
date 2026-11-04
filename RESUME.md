@@ -147,12 +147,12 @@ What milestone 5 gives it (`src/sidecars/`, `src/core/xmp.ts`):
    (`reconcile(ctx, units)`: reads the sidecar and each copy, merges, writes the sidecar's changed fields, refreshes
    every copy when the sidecar changed and any copy not in step with what it would read from it, mirrors trash from
    online copies, makes F2's minimal sidecar in inbox sources, records the unit; a dry run writes, records and
-   acknowledges nothing), tested end to end with two accounts' copies (`reconcile.test.ts`). Left: the daemon's
-   `sync` job (watcher into `DirtyUnits`, full pass daily, each account's stream with
-   the reconcile as `act`; `learnAllAssets` when an account has no assets yet or after a reset). Done too: `planWrite`
-   writes `TagsList` where there's a title, so the title tag reaches Immich.
-   Originally: the reconcile loop (section 5) and F1–F8, with the merge from `src/core/tags.ts`. Each copy's tags come from
-   `getAsset` (`tags`). Writes to Immich in bulk (`refreshMetadata`, `trashAssets`, `restoreAssets`).
+   acknowledges nothing), tested end to end with two accounts' copies (`reconcile.test.ts`). Done: the daemon's
+   jobs (`src/sync/job.ts`, `Sync`): at start it starts exiftool (stopping the daemon with the install command if
+   it's missing), the covered folders' watcher and the watch-allowance check; `full-pass` runs at start and daily;
+   `sync` runs each minute and after every change the watcher sees: each account's stream (learning all its assets
+   first when the store has none, and again after a reset), then up to 200 dirty units once quiet for 2 s. A dry run
+   reads the streams once per start. Tests: 354 unit, 398 with the development Immich (twice in a row).
 6. **F1's setting** (whether the server reads new sidecars on refresh), and F8's offline check.
 
 Before anything runs against the author's real files: a dry run over everything, and the author's approval of the

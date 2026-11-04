@@ -109,5 +109,6 @@ describeImmich("account upkeep, end to end, against Immich", () => {
     expect(await daemon.exited).toBe(0);
     expect(out).toContain("would create library");
     expect(out).toContain("account upkeep done (dry run: nothing changed)");
+    expect(out).toContain("sync started");
   });
 });

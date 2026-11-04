@@ -89,6 +89,15 @@ test("dirty units are taken once they've been quiet", () => {
   expect(dirty.size).toBe(0);
 });
 
+test("dirty units are taken a limited number at a time", () => {
+  let now = 0;
+  const dirty = new DirtyUnits(() => now);
+  for (const name of ["/a.jpg", "/b.jpg", "/c.jpg"]) dirty.add(name);
+  now = 1000;
+  expect(dirty.take(1000, 2)).toEqual({ units: ["/a.jpg", "/b.jpg"], nextInMs: 0 });
+  expect(dirty.take(1000, 2)).toEqual({ units: ["/c.jpg"], nextInMs: undefined });
+});
+
 test("the full pass returns units without a record, or whose sidecar changed", async () => {
   const state = State.open(join(dir, "state"));
   const store = new SyncStore(state.db);

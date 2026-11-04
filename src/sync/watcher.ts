@@ -54,17 +54,21 @@ export class DirtyUnits {
     return this.changed.size;
   }
 
-  /** Takes the units quiet for at least `quietMs`, and says how soon the next one will be (undefined if none left). */
-  take(quietMs: number): { units: string[]; nextInMs?: number } {
+  /**
+   * Takes the units quiet for at least `quietMs`, at most `limit` of them, and says how soon to take more: now, if
+   * quiet ones are left over, or when the next one will be quiet (undefined if none are left).
+   */
+  take(quietMs: number, limit = Number.POSITIVE_INFINITY): { units: string[]; nextInMs?: number } {
     const now = this.now();
     const units: string[] = [];
     let soonest: number | undefined;
     for (const [media, at] of this.changed) {
       const left = at + quietMs - now;
-      if (left <= 0) {
+      if (left > 0) soonest = Math.min(soonest ?? left, left);
+      else if (units.length < limit) {
         units.push(media);
         this.changed.delete(media);
-      } else soonest = Math.min(soonest ?? left, left);
+      } else soonest = 0;
     }
     return { units: units.sort(), nextInMs: soonest };
   }

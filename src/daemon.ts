@@ -4,6 +4,7 @@ import { EXIT } from "./exit.ts";
 import { log } from "./log.ts";
 import { Scheduler } from "./scheduler.ts";
 import { State } from "./state.ts";
+import { STREAM_INTERVAL_MS, Sync } from "./sync/job.ts";
 import { upgrade } from "./upgrade.ts";
 import { checkJob, upkeepJob } from "./upkeep/upkeep.ts";
 import { IS_COMPILED, VERSION } from "./version.ts";
@@ -37,7 +38,9 @@ export async function runDaemon(config: Config, options: DaemonOptions): Promise
     dryRun: options.dryRun || undefined,
   });
 
-  // The jobs register here as they're built (RESUME.md has the milestones).
+  // Sync (DESIGN.md, sections 3 and 5): the full pass at start and daily; the sync job each minute and after each
+  // change the watcher sees. Without exiftool, the daemon stops here, saying how to install it.
+  const sync = await Sync.start(config, state, { dryRun: options.dryRun, signal: stopping.signal }, () => scheduler.trigger("sync"));
 
   // Account upkeep (DESIGN.md, section 8): at start, then on every full pass. The check follows each upkeep, once
   // Immich has finished any scan it started.
@@ -47,6 +50,11 @@ export async function runDaemon(config: Config, options: DaemonOptions): Promise
     return result;
   });
   scheduler.add("check", { intervalMs: config.timing.fullPassMs, firstInMs: config.timing.fullPassMs }, () => checkJob(config, { signal: stopping.signal }));
+  scheduler.add("full-pass", { intervalMs: config.timing.fullPassMs, firstInMs: 0 }, async () => {
+    await sync.fullPass();
+    scheduler.trigger("sync");
+  });
+  scheduler.add("sync", { intervalMs: STREAM_INTERVAL_MS, firstInMs: 0 }, () => sync.run());
 
   if (config.upgrade.enabled && !IS_COMPILED) {
     log.info("automatic upgrades are on, but this runs from source, so it won't upgrade itself");
@@ -81,6 +89,7 @@ export async function runDaemon(config: Config, options: DaemonOptions): Promise
   }
 
   await scheduler.loop();
+  await sync.close();
   state.close();
   log.info("stopped");
   return exitStatus;
