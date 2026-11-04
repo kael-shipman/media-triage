@@ -16,14 +16,23 @@ session stops partway.
 - **Upgrades:** `media-triage upgrade` (`--check`, `--to`), and the daemon's scheduled check, which exits with
   status 75 after upgrading so systemd restarts it. Tested against a fake release server; the daemon's own path still
   needs the end-to-end check in step 5, with real executables.
+- **The installer,** `install.sh`: picks the release, checks its hash and its `version`, installs into `~/.local/bin`,
+  runs `init`, and optionally writes and enables a user or system systemd unit. Tested with dash against a fake
+  release server, with `systemctl` stubbed. shellcheck is clean (`npx shellcheck -s sh install.sh`).
 - **`run` starts and stops cleanly. Its only job so far is the upgrade check.**
-- **Tests:** 81, all passing (`npx bun@1.4.4 test`), and the type check is clean.
+- **Tests:** 88, all passing (`npx bun@1.4.4 test`), and the type check is clean.
 
 ## Next
 
-**Exactly what to do next:** milestone 1, step 4: the installer, `install.sh` at the repository's root (DESIGN.md,
-section 12). POSIX `sh`, so `curl … | sh -s -- [options]` works. Test it locally against a fake release server, with
-`--repo` pointing at it.
+**Exactly what to do next:** milestone 1, step 5: CI and releases.
+1. `scripts/build.ts`: `bun build --compile` for `bun-linux-x64` and `bun-linux-arm64`, with
+   `--define MEDIA_TRIAGE_VERSION='"X.Y.Z"'` from the tag (or `package.json`), into `dist/`, plus `dist/SHA256SUMS`.
+   Check that a built executable reports its version and that `IS_COMPILED` is true in it.
+2. `.github/workflows/ci.yml` (on push and pull request: install, type check, test, build) and `release.yml` (on a
+   `v*` tag: the same, then a GitHub release with the two executables and `SHA256SUMS`, marked pre-release if the tag
+   has a hyphen).
+3. An end-to-end check: tag `v0.1.0-rc.1` and `v0.1.0-rc.2`; install rc.1 with `install.sh --prerelease --version`,
+   then run its daemon with `upgrade.prerelease = true` and watch it upgrade itself to rc.2 and exit 75.
 
 ## Milestones
 
@@ -34,7 +43,7 @@ Each step ends with tests passing, a commit, and this file updated.
 2. [x] Command line (`help`, `version`, `init`, `config`, `run`), TOML configuration with validation, state database
    (`bun:sqlite`), logging.
 3. [x] Upgrades (`upgrade`, and the daemon's scheduled check), tested against a local fake release server.
-4. [ ] The installer (`install.sh`).
+4. [x] The installer (`install.sh`).
 5. [ ] CI (`.github/workflows/ci.yml`) and releases (`release.yml`); a first pre-release to try the installer and an
    upgrade end to end.
 
