@@ -86,6 +86,9 @@ session stops partway.
   `classifyPath` in `src/core/folder-dates.ts` (allowed, rejected and why, or outside every dated level), checked
   against a real fast-glob crawl with the generated patterns. That crawl showed a dotted folder above a dated level
   (`Videos/My.Clips`) isn't excluded, contrary to what DESIGN.md said; corrected.
+- **Milestone 4, step B:** `src/upkeep/accounts.ts` (`openAccounts`: each account's session, checked, or a problem
+  saying what to do) and `src/upkeep/cluster.ts` (`joinClusterGroup`: invite from the first account, accept with the
+  joiner's session, re-read to confirm; `--dry-run` only reports). Tested with fresh users.
 - **Cleanup:** milestone 2's tests held a real date, a real person's name and real folder names; replaced with
   made-up ones (`7b4143a`). They remain in the repository's history.
 - **Tests:** 260 without Immich, all passing (`npx bun@1.4.4 test`), and 266 with the development Immich (as of
@@ -103,10 +106,10 @@ done: `src/immich/` wraps every call the daemon needs, each tested against the d
 up`, then `MEDIA_TRIAGE_IMMICH_TESTS=1 bun test`). Milestone 4 doesn't depend on the open questions below.
 
 0. [x] **Pure rules** (step A): the library plan and `classifyPath`.
-1. **Accounts:** for each configured account, load its session (`loadSession`; no session means skip the account
+1. [x] **Accounts:** for each configured account, load its session (`loadSession`; no session means skip the account
    with a message saying to run `media-triage login <account>`), and read its user ID and cluster group (`me()`).
    Library work needs the admin account's session.
-2. **Cluster group:** every account joins the first account's group (`inviteToClusterGroup` from the first account,
+2. [x] **Cluster group:** every account joins the first account's group (`inviteToClusterGroup` from the first account,
    `acceptClusterGroupInvitation` with the joining account's session), **before** any library of the joining account is
    created.
 3. **Libraries:** for each `[[immich.libraries]]`, the wanted state: owner (the account's user ID), name, folders,

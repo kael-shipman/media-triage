@@ -117,6 +117,10 @@ daemon needs a login session:
   price of the sync stream. Creating libraries for other accounts needs the admin's session (section 8).
 - **Expiry:** Immich deletes sessions unused for 90 days (`session.repository.ts`, `cleanup`). Using one refreshes it
   hourly (`auth.service.ts`), so only a daemon stopped for 90 days needs a new login.
+- **Using them** (`src/upkeep/accounts.ts`): each pass opens every configured account's session and checks it
+  (`GET /api/users/me`). An account that isn't logged in, whose session file others can read, whose session was
+  revoked or expired, or whose session belongs to another email is skipped, with what to do. Immich being unreachable
+  stops the pass instead, to be tried again at the next one.
 - **Which session:** the daemon keeps the login session itself. A child session (`POST /sessions`) would be deleted
   along with its parent (`session.table.ts`, cascade).
 
@@ -309,7 +313,8 @@ or a library.
 - **Cluster group:** every configured account is in one cluster group (Immich 3.2).
   - An account that isn't gets invited from the first account's group, and accepts with its own session.
   - This happens **before that account's libraries are created**, so its faces cluster into the people that already
-    exist.
+    exist. An account that isn't in the group by the end of this step (the first account isn't logged in, or joining
+    failed) gets none of its libraries created in that pass.
   - Joining keeps people and names (`cluster-group.service.ts`, `acceptRequest`). The group's "Reset facial
     recognition" is what deletes every person and name; the daemon never calls it. Checked against 3.3.5: the
     joining account keeps its named people.

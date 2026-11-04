@@ -83,13 +83,26 @@ export const FIXTURES = join(import.meta.dir, "..", "fixtures");
 
 /** A configuration for the development Immich, with both users as accounts, and the given state folder. */
 export function testConfig(stateDir: string): Config {
+  return configFor(stateDir, Object.entries(USERS).map(([name, user]) => ({ name, user })));
+}
+
+/**
+ * A configuration for the development Immich with these accounts (the first configured is the first account), and
+ * optionally libraries and other settings, in the configuration file's own shape.
+ */
+export function configFor(
+  stateDir: string,
+  accounts: { name: string; user: TestUser }[],
+  extra: { libraries?: Record<string, unknown>[]; paths?: Record<string, unknown> } = {},
+): Config {
   return parseConfig(
     {
-      paths: { state: stateDir },
+      paths: { state: stateDir, ...extra.paths },
       immich: {
         url: IMMICH_URL,
         path_map: [{ immich: `${IMMICH_MEDIA}/`, local: `${MEDIA_DIR}/` }],
-        accounts: Object.entries(USERS).map(([name, user]) => ({ name, email: user.email, admin: user.admin })),
+        accounts: accounts.map(({ name, user }) => ({ name, email: user.email, admin: user.admin })),
+        libraries: extra.libraries ?? [],
       },
     },
     null,
@@ -137,7 +150,7 @@ export async function indexedLibrary(
  * joining a cluster group), so that no other test depends on the order they run in.
  */
 export async function newUser(adminToken: string, label: string): Promise<TestUser> {
-  const unique = `${label}-${crypto.randomUUID().slice(0, 8)}`;
+  const unique = `${label.toLowerCase()}-${crypto.randomUUID().slice(0, 8)}`;
   const user: TestUser = { name: `${label} Example`, email: `${unique}@example.com`, password: `${unique}-password`, admin: false };
   await api("POST", "/admin/users", { token: adminToken, body: { email: user.email, password: user.password, name: user.name } });
   return user;
