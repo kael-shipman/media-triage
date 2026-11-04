@@ -63,8 +63,8 @@ session stops partway.
   against the development Immich, which also showed:
   - searches include trashed, archived, hidden and offline assets, but not locked ones; a locked asset reads like a
     missing one without the PIN;
-  - a missing file becomes offline **and** trashed, and both clear when it's back (the F8 question below);
-  - `refresh-metadata` ignores a sidecar that appeared after indexing (the F1 question below).
+  - a missing file becomes offline **and** trashed, and both clear when it's back (F8, decided below);
+  - `refresh-metadata` ignores a sidecar that appeared after indexing (F1, decided below).
 - **Albums, faces and people** (milestone 3, step 2): `albums.ts` (list, create, add and remove in bulk; adding twice
   or removing what isn't there is fine), `faces.ts` (read, add by hand, reassign, soft delete), `people.ts` (list,
   create, rename in bulk, share all, list shares). Found and handled:
@@ -138,35 +138,27 @@ Milestone 5 (DESIGN.md, sections 6 and 10):
 6. **Fixtures:** a Darktable sidecar and an Immich one, made up, with no personal data; `src/core/` already has the
    tag and title rules to apply to them.
 
-Also, before milestone 6: account upkeep runs as one scheduler job and can wait up to 30 minutes for scans, and no
-other job runs meanwhile. Once sync exists, that wait should move out of the job (for example, a separate check job
-that runs when the library queue is idle).
+**Decided by the author, 2026-11-04** (DESIGN.md has each; they shape milestone 6):
+- **F1, sidecars Immich never reads:** a metadata refresh re-reads only a sidecar Immich already knows, so a sidecar
+  that appeared after indexing (F2's, or Darktable's first) is never read on stock Immich. **Fixed in the fork,** not
+  worked around here: its `refresh-metadata` will look for a sidecar first (`asset.service.ts`, `run`: queue
+  `SidecarCheck`, whose follow-up job is the extraction). That patch belongs to the fork's track and isn't written yet
+  (the project's task 0058). Here, milestone 6 adds a setting, like `mirrors_face_corrections`, saying whether the
+  server has the fix.
+- **F8, offline isn't trash:** a trash or restore is mirrored only after reading, through the API, that the copy it
+  happened to isn't offline. Going offline and coming back online are never mirrored.
+- **The covered folders:** what the daemon watches and passes over is every configured library's folders (mapped to
+  local paths) plus the inbox's sources, not everything under `paths.archive`, which is only where filing puts files.
 
-**Open question for the author, F1 (needed by milestone 6):** a metadata refresh re-reads only a sidecar Immich
-already knows. Immich looks for sidecars when it first indexes a file, and `refresh-metadata` doesn't look again
-(checked in the source and tested: `src/immich/assets.test.ts`). So every new phone photo whose sidecar F2 creates
-after Immich indexed it would never be read, and the same goes for Darktable's first sidecar on an archive photo.
-The API has no per-asset way to look again. Options:
-- (a) **The fork:** make `refresh-metadata` look for a sidecar first (`asset.service.ts`, `run`: queue
-  `SidecarCheck`, whose follow-up job is the extraction). One line, and a likely upstream fix too. media-triage would
-  get a setting, like `mirrors_face_corrections`.
-- (b) **Stock Immich:** the admin's "discover sidecars" queue (`PUT /api/queues/sidecar`, `start`, not forced),
-  throttled. It re-extracts the metadata of every asset Immich knows no sidecar for, in every account (even when it
-  finds none), so it's cheap only once almost every asset has a known sidecar. That means creating minimal sidecars
-  for all media without one, archive included: a one-time burst of new files that sync everywhere.
-- (c) Both: (a) where the server has it, (b) otherwise.
-
-**Open question for the author, safety (needed by milestone 6, F8):** in 3.3.5, a library file that goes offline
-(missing, or newly excluded) gets `isOffline` **and `deletedAt`** (`library.service.ts`, around line 549), and coming
-back online clears both. The sync stream has no `isOffline`, so going offline looks exactly like being trashed. As F8
-is written, a change to one account's exclusion patterns would trash the other accounts' online copies, and emptying
-their trash 30 days later deletes the original files. Proposal: F8 mirrors a trash or restore only after checking
-through the API that the copy isn't offline, and never mirrors going offline or coming back online.
-
-**Open question for the author** (needed by milestone 6, the watcher): which folders count as
-"the archive" for watching and the full pass. `paths.archive` can be the root of a larger tree (Setup files, backups),
-and watching all of it is wasted work. Proposal: the folders of every configured library, mapped to local paths, plus
-the inbox sources.
+**Before sync is built (milestone 6): upkeep holds up every other job while it waits for scans.** The scheduler runs
+one job at a time, on purpose, so that nothing runs in the middle of anything else. Upkeep is one job. When it has
+created or changed a library, it starts Immich's scans and then waits, up to 30 minutes, for them to finish, so that
+the check sees the result. Today the only other job is the upgrade check, so nothing is lost. Once sync and filing
+are jobs too, they'd stand still during that wait: a rating made on a phone wouldn't reach the other account until
+the scans were done. The wait happens only on passes that changed a library (the first run, or after a change to the
+configuration), but the first scan of a whole archive library on a small server can take longer than 30 minutes, and
+then the check also slips to the next full pass, a day later. The fix, when sync exists: upkeep starts the scans and
+ends, and the check becomes its own job, run when Immich's library queue is next idle.
 
 ## Milestones
 

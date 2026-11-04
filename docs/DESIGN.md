@@ -23,6 +23,11 @@ either tool or any account. So sync, the Immich-only state, named faces and orph
 every photo and video in the archive as well as in the inbox. Only filing (section 7) is limited to the inbox. That
 means tens of thousands of files and assets, and section 13 says how the daemon keeps that cheap.
 
+**The covered folders** are the folders of every configured library (`[[immich.libraries]]`, mapped to local paths
+through `path_map`), plus the inbox's sources. That's what the daemon watches and passes over. `paths.archive` is only
+where filing puts files: it can be the root of a larger tree (setup files, backups) with nothing to sync, which isn't
+watched.
+
 **Why one program:** these functions act on the same files and the same Immich assets, in a set order: merge, then
 file. Separate tools would race each other. For example, a title and `Promote` might be added together, or a sidecar
 write might land after a move. One process with one state database removes the races.
@@ -41,7 +46,7 @@ with `--config` or `MEDIA_TRIAGE_CONFIG`. [examples/config.toml](../examples/con
 
 | Section | What it holds |
 |---|---|
-| `[paths]` | The inbox, the archive, and the state folder |
+| `[paths]` | The inbox, the archive (where filing puts files), and the state folder |
 | `[[sources]]` | Each inbox subfolder that's a source, with the creator its files get. Subfolders that aren't listed are left alone |
 | `[immich]` | The server's URL, and a path map from Immich's paths (inside its container) to the daemon's, both ways (`src/core/path-map.ts`; the longest matching folder wins) |
 | `[[immich.accounts]]` | Each account: a name used in logs and for its session file, and whether it's the admin |
@@ -59,8 +64,9 @@ database, the Immich sessions and the logs. **Never put it inside a synced folde
 Changes come from three places. Each change marks a **unit** dirty: a media file, its sidecar, and a Live Photo's
 video. Units in the archive count as much as units in the inbox (section 1).
 
-1. **Files:** inotify on the inbox and the archive, with a watch per folder. It sees files arriving from the phones,
-   Darktable's sidecars, and Immich's sidecar writes. A full pass at start, and then daily, catches anything missed.
+1. **Files:** inotify on the covered folders (section 1), with a watch per folder. It sees files arriving from the
+   phones, Darktable's sidecars, and Immich's sidecar writes. A full pass over the same folders at start, and then
+   daily, catches anything missed.
 2. **Immich, per account: its sync stream** (`POST /api/sync/stream`), the feed of changes the phone apps use. It
    asks for these types, all current in Immich 3.3 (which refuses `AssetsV1`: `sync.service.ts`, `syncAssetsV1`):
    - `AssetsV2`: trash (`deletedAt`), `isFavorite`, `visibility` (archived, locked), the library, the Live Photo's
@@ -146,8 +152,12 @@ If the state is lost, merge as a union, which never drops a tag, and report it.
   media files.
   - **A refresh re-reads only a sidecar Immich already knows** (checked against 3.3.5). It looks for sidecars when it
     first indexes a file (`SidecarCheck`), and `refresh-metadata` doesn't look again (`asset.service.ts`, `run`), so
-    a sidecar that appeared later, such as one made by F2 just after Immich indexed the photo, isn't read. How the
-    daemon gets Immich to find it is open (RESUME.md).
+    a sidecar that appeared later, such as one made by F2 just after Immich indexed the photo, isn't read.
+  - **Fixed in the server, not worked around here** (decided 2026-11-04): the author's fork
+    ([kael-shipman/immich](https://github.com/kael-shipman/immich)) gets a small change so that `refresh-metadata`
+    looks for a sidecar first (it queues `SidecarCheck`, whose follow-up job is the extraction), a fix upstream could
+    take too. A setting, like `mirrors_face_corrections`, says whether the server has it. On a server without it, the
+    daemon still refreshes, and sidecars that appeared after indexing stay unread there.
 - **F2. Creator.** A file in an inbox source with no `dc:creator` gets the source's creator. An existing creator is
   never overwritten. Most new photos have no sidecar yet, so create a minimal `<file>.<ext>.xmp`.
 - **F3. Title.** The tag `Title/<title>` (Immich) and `dc:title` (Darktable) stay equal.
@@ -175,7 +185,11 @@ If the state is lost, merge as a union, which never drops a tag, and report it.
   either trash deletes the file, and the other copies go offline.
   - **Offline looks like trash** (checked against 3.3.5): a library file that goes missing or is newly excluded gets
     `isOffline` and `deletedAt` (`library.service.ts`), and coming back clears both. The sync stream has no
-    `isOffline`. How F8 tells the two apart is open (RESUME.md).
+    `isOffline`.
+  - **So only a real trash or restore is mirrored** (decided 2026-11-04): before mirroring one, the daemon reads the
+    copy it happened to through the API, and mirrors it only if that copy isn't offline. Going offline and coming back
+    online are never mirrored. Otherwise a change to one account's exclusion patterns would trash the other accounts'
+    online copies, and emptying their trash 30 days later would delete the files.
 - **F9. Immich-only state, in the sidecar.** For each account: favorite, visibility (archived, locked) and album
   memberships (the album's ID and name).
   - Stored in a namespace of the daemon's own, keyed by account, and written when they change.
@@ -477,8 +491,8 @@ with what changed, not with the size of the archive.
   restoring (`POST /api/trash/restore/assets`), and favorites and visibility (`PUT /api/assets`) each take a list of
   assets. A change to a thousand photos is a few requests, not a thousand.
 - **The state database** is indexed by path and by asset ID, and each batch's writes are one transaction.
-- **inotify needs a watch per folder.** At start, the daemon compares the number of folders with
-  `fs.inotify.max_user_watches`, and says how to raise it if it's too low. Other programs, such as Syncthing, use
+- **inotify needs a watch per folder** of the covered folders (section 1). At start, the daemon compares their number
+  with `fs.inotify.max_user_watches`, and says how to raise it if it's too low. Other programs, such as Syncthing, use
   watches from the same allowance.
 - **The first run is the heaviest:** it reads every sidecar once, and streams every asset once per account. Run it with
   `--dry-run` first, which shows what it would do, with counts.
@@ -486,6 +500,8 @@ with what changed, not with the size of the archive.
 ## History
 
 - 2026-11-03: written, from the plan made for the author's own setup.
+- 2026-11-04: the author decided three open questions: F1's unread sidecars are fixed in the fork; F8 mirrors only
+  a trash or restore of a copy that isn't offline; the covered folders are the libraries' and the inbox's sources.
 - 2026-11-04: sync covers the whole archive, not just the inbox (section 1), and section 13 (scale) added. Section 3
   corrected from Immich 3.3.5's source: `AssetsV2` and `AlbumsV2` instead of the V1 types, the stream carries no
   paths, `AssetFacesV3` covers the cluster group, and resets.

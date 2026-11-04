@@ -8,7 +8,8 @@
 [paths]
 # The inbox: each subfolder listed under [[sources]] is a source of new photos and videos (a phone's camera folder).
 inbox = "/srv/media/Inbox"
-# The archive: filing moves photos and videos into it, and sync keeps every sidecar in it in step.
+# The archive: filing moves photos and videos into it. (Sync covers the folders of the libraries below, mapped
+# through path_map, and the inbox's sources, not everything under the archive.)
 archive = "/srv/media"
 # The state folder: the database, the Immich sessions and the logs. Never inside a synced folder.
 # state = "~/.local/state/media-triage"
