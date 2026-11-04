@@ -149,9 +149,18 @@ export async function indexedLibrary(
  * A new user, made by the admin with a unique made-up email, for tests that change an account for good (such as
  * joining a cluster group), so that no other test depends on the order they run in.
  */
-export async function newUser(adminToken: string, label: string): Promise<TestUser> {
+export async function newUser(adminToken: string, label: string, options: { admin?: boolean } = {}): Promise<TestUser> {
   const unique = `${label.toLowerCase()}-${crypto.randomUUID().slice(0, 8)}`;
-  const user: TestUser = { name: `${label} Example`, email: `${unique}@example.com`, password: `${unique}-password`, admin: false };
-  await api("POST", "/admin/users", { token: adminToken, body: { email: user.email, password: user.password, name: user.name } });
+  const admin = options.admin ?? false;
+  const user: TestUser = { name: `${label} Example`, email: `${unique}@example.com`, password: `${unique}-password`, admin };
+  await api("POST", "/admin/users", { token: adminToken, body: { email: user.email, password: user.password, name: user.name, isAdmin: admin } });
   return user;
+}
+
+/** Copies of the fixture photo at these paths, relative to `root`. */
+export function photos(root: string, paths: string[]): void {
+  for (const path of paths) {
+    mkdirSync(join(root, path, ".."), { recursive: true });
+    copyFileSync(join(FIXTURES, "photo.jpg"), join(root, path));
+  }
 }

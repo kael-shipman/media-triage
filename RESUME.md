@@ -89,6 +89,10 @@ session stops partway.
 - **Milestone 4, step B:** `src/upkeep/accounts.ts` (`openAccounts`: each account's session, checked, or a problem
   saying what to do) and `src/upkeep/cluster.ts` (`joinClusterGroup`: invite from the first account, accept with the
   joiner's session, re-read to confirm; `--dry-run` only reports). Tested with fresh users.
+- **Milestone 4, step C:** `src/upkeep/libraries.ts` (`upkeepLibraries`: owners by email from the admin's user
+  list, the plan, create only for accounts in the group, correct, scan what changed, report the unconfigured) and
+  `waitForLibraryQueue` in `src/immich/libraries.ts`. Tested end to end: a date-limited library indexes exactly the
+  allowed files, and moving its cutover takes the newly excluded ones out.
 - **Cleanup:** milestone 2's tests held a real date, a real person's name and real folder names; replaced with
   made-up ones (`7b4143a`). They remain in the repository's history.
 - **Tests:** 260 without Immich, all passing (`npx bun@1.4.4 test`), and 266 with the development Immich (as of
@@ -112,7 +116,7 @@ up`, then `MEDIA_TRIAGE_IMMICH_TESTS=1 bun test`). Milestone 4 doesn't depend on
 2. [x] **Cluster group:** every account joins the first account's group (`inviteToClusterGroup` from the first account,
    `acceptClusterGroupInvitation` with the joining account's session), **before** any library of the joining account is
    created.
-3. **Libraries:** for each `[[immich.libraries]]`, the wanted state: owner (the account's user ID), name, folders,
+3. [x] **Libraries:** for each `[[immich.libraries]]`, the wanted state: owner (the account's user ID), name, folders,
    and exclusion patterns (the hidden-file patterns, the configured `exclude`, and `datedExclusions` from
    `src/core/exclusions.ts`; at most 128). Match existing libraries by owner and name (`listLibraries`). Create the
    missing ones, correct folders and exclusion patterns that differ, and scan only what changed. Report libraries in

@@ -284,6 +284,11 @@ or a library.
   - Immich allows at most 128 import paths and 128 exclusion patterns per library, each unique and non-empty. The
     daemon checks before sending, so the error names the library.
   - It never deletes a library. A library that's in Immich but not in the configuration is reported.
+  - **Owners** are found by email in the admin's list of users, so libraries are matched even for an account that
+    isn't logged in. Creating a library waits until its account is in the cluster group (below); correcting one needs
+    only the admin, so a fix to its exclusions is never held up by a missing login.
+  - **Scans** run in Immich's library queue. The check (below) waits until that queue is idle, polled until it's
+    empty twice in a row.
 - **Libraries limited by date** (`since = "YYYY-MM-DD"`): the library sees only names that start with a date on or
   after `since`, at the configured levels (for example, the first folder level under `Pictures` and the second under
   `Videos`). Everything else is excluded: earlier dates, undated names, and names whose date is too vague (`2020` or

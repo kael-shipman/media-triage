@@ -4,12 +4,14 @@
 
 import {
   type LibraryResponseDto,
+  QueueName,
   type LibraryStatsResponseDto,
   type UserAdminResponseDto,
   type ValidateLibraryImportPathResponseDto,
   createLibrary as sdkCreateLibrary,
   getAllLibraries,
   getLibraryStatistics,
+  getQueue,
   scanLibrary as sdkScanLibrary,
   searchUsersAdmin,
   updateLibrary as sdkUpdateLibrary,
@@ -91,4 +93,27 @@ export async function validateImportPaths(admin: ImmichClient, id: string, impor
 /** Every account on the server, for matching configured accounts to their user IDs. */
 export function listUsers(admin: ImmichClient): Promise<UserAdminResponseDto[]> {
   return admin.call("Listing users", (opts) => searchUsersAdmin({}, opts));
+}
+
+/** Whether Immich's library queue is idle: no scan or import running, waiting or delayed (`GET /api/queues/library`). */
+export async function libraryQueueIdle(admin: ImmichClient): Promise<boolean> {
+  const queue = await admin.call("Reading the library queue", (opts) => getQueue({ name: QueueName.Library }, opts));
+  const { active, waiting, delayed } = queue.statistics;
+  return active + waiting + delayed === 0;
+}
+
+/**
+ * Waits until the library queue has been idle twice in a row, a poll apart, so a scan that has only just been queued
+ * isn't missed. Returns false if it's still busy after `timeoutMs`.
+ */
+export async function waitForLibraryQueue(admin: ImmichClient, timeoutMs: number, pollMs = 1000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  let idleBefore = false;
+  for (;;) {
+    const idle = await libraryQueueIdle(admin);
+    if (idle && idleBefore) return true;
+    idleBefore = idle;
+    if (Date.now() > deadline) return false;
+    await Bun.sleep(pollMs);
+  }
 }
