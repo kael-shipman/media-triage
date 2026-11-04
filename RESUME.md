@@ -117,10 +117,12 @@ What milestone 5 gives it (`src/sidecars/`, `src/core/xmp.ts`):
 1. [x] **The check is its own job** (done 2026-11-04): upkeep starts scans and ends; the `check` job runs after each
    upkeep once Immich's library queue is idle twice in a row (`checkIfIdle`, `checkJob` in `src/upkeep/upkeep.ts`),
    looking again each minute while it's busy.
-2. **State:** each asset's ID, owner, library and path (the sync stream has no paths; look up new ones in bulk with
-   `libraryPages` on a first run, after a reset, or when a batch has many new assets, and one by one with `getAsset`
-   otherwise), and each unit's last-synced record (section 5), with the sidecar's size and mtime. New tables are new
-   migrations in `src/state.ts`; never edit a released one.
+2. [x] **State** (done 2026-11-04): migration 2 in `src/state.ts`, used through `SyncStore` (`src/sync/store.ts`):
+   `assets` (ID, account, owner, library, Immich's path, the local path, trashed, visibility; indexed by local path
+   and account) and `units` (the media file's local path, its sidecar's stamp, and the last-synced values as JSON:
+   `SyncedValues`). Not yet filled: the sync stream consumer (step 4) adds assets, looking up new ones' paths in bulk
+   with `libraryPages` on a first run, after a reset, or when a batch has many new assets, and one by one with
+   `getAsset` otherwise; the reconcile (step 5) writes units.
 3. **The watcher:** inotify over the covered folders, a watch per folder, with the `fs.inotify.max_user_watches`
    check (section 13). The full pass stats files and reads only sidecars that changed.
 4. **The sync stream consumer**, per account: `syncStream` gives batches; act on a batch, then `acknowledge` its

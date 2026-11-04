@@ -9,6 +9,28 @@ import { join } from "node:path";
 const MIGRATIONS: readonly string[] = [
   // 1: small values kept between runs, such as the last upgrade check.
   `create table kv (key text primary key, value text not null) strict`,
+  // 2: sync (src/sync/store.ts): every Immich asset the daemon knows, since the sync stream carries no paths, and
+  // each unit's last-synced values, with its sidecar's stamp.
+  `create table assets (
+    id text primary key,
+    account text not null,
+    owner text not null,
+    library text,
+    path text not null,
+    local text,
+    trashed integer not null default 0,
+    visibility text not null default 'timeline'
+  ) strict;
+  create index assets_local on assets (local);
+  create index assets_account on assets (account);
+  create table units (
+    path text primary key,
+    sidecar_size integer,
+    sidecar_mtime real,
+    sidecar_ino integer,
+    synced text not null,
+    updated text not null
+  ) strict`,
 ];
 
 /** The daemon's SQLite database, in the state folder. */
