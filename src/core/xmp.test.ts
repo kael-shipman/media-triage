@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { type XmpFields, TAGS, darktableReads, immichReads, offsetFromImmich, parseXmp, planWrite, sameDate } from "./xmp.ts";
+import { type XmpFields, TAGS, darktableReads, dateFromImmich, immichReads, offsetFromImmich, parseXmp, planWrite, sameDate } from "./xmp.ts";
 
 /** What exiftool reads from a sidecar Darktable wrote, in the shape src/sidecars/ asks for (every value quoted). */
 const darktableRaw = {
@@ -245,6 +245,8 @@ describe("planWrite", () => {
     expect(offsetFromImmich(asset)).toBe("+02:00");
     expect(offsetFromImmich({ ...asset, fileCreatedAt: "2021-06-15T15:50:30.000Z", timeZone: "UTC-5:30" })).toBe("-05:30");
     expect(offsetFromImmich({ ...asset, timeZone: null })).toBeUndefined();
+    expect(dateFromImmich(asset)).toBe("2021:06:15 10:20:30.000+02:00");
+    expect(dateFromImmich({ ...asset, timeZone: null })).toBe("2021:06:15 10:20:30.000");
   });
 
   test("GPS is written as a pair, and removed", () => {

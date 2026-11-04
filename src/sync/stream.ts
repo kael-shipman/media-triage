@@ -17,6 +17,8 @@ export interface StreamOptions {
   act: (units: string[]) => Promise<void>;
   batchSize?: number;
   bulkLookup?: number;
+  /** Read and act, but acknowledge nothing, so a later live run sees every change. */
+  dryRun?: boolean;
   signal?: AbortSignal;
 }
 
@@ -103,7 +105,7 @@ export async function consumeStream(account: OpenAccount, store: SyncStore, map:
   for await (const batch of syncStream(account.client, { batchSize: options.batchSize, signal: options.signal })) {
     if (batch.reset) {
       // Acknowledging the reset clears the session's checkpoints; the next read sends everything.
-      await acknowledge(account.client, batch.acks);
+      if (!options.dryRun) await acknowledge(account.client, batch.acks);
       store.forgetAccount(account.account.name);
       log.warn("Immich reset the account's sync stream; reading the whole account again", { account: account.account.name });
       outcome.reset = true;
@@ -135,7 +137,7 @@ export async function consumeStream(account: OpenAccount, store: SyncStore, map:
     }
     store.removeAssets(deleted);
     await options.act([...units].sort());
-    await acknowledge(account.client, batch.acks);
+    if (!options.dryRun) await acknowledge(account.client, batch.acks);
   }
   return outcome;
 }

@@ -219,6 +219,12 @@ export function offsetFromImmich(asset: { localDateTime: string; fileCreatedAt: 
   return `${sign}${pad2(Math.abs(minutes) / 60)}:${pad2(Math.abs(minutes) % 60)}`;
 }
 
+/** An Immich asset's capture time as the daemon compares dates: its wall time, with its offset when Immich knows it. */
+export function dateFromImmich(asset: { localDateTime: string; fileCreatedAt: string; timeZone?: string | null }): string {
+  const wall = asset.localDateTime.replace(/Z$/, "").replace("T", " ").replace(/^(\d{4})-(\d{2})-(\d{2})/, "$1:$2:$3");
+  return withOffset(wall, offsetFromImmich(asset));
+}
+
 /**
  * Whether two dates are the same moment as both tools see it: the same wall time to the second, and the same offset
  * when both have one. Darktable keeps neither sub-seconds nor offsets (it rewrites Immich's

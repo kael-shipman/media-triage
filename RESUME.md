@@ -143,11 +143,12 @@ What milestone 5 gives it (`src/sidecars/`, `src/core/xmp.ts`):
 5. **The reconcile loop** (in progress). Done: the pure merge, `src/core/merge.ts` (`mergeUnit(base, title, sides)`;
    sides are Darktable's view of the sidecar and each copy through the API, each as `SideValues`; tags tag by tag
    with the title as `Title/…`; rating, description, date, GPS to the latest change; F8 trash from online copies;
-   two titles are a conflict). `SyncedValues` (the base) gained `trashed`. Left: `src/sync/reconcile.ts` (read the
-   sidecar and each copy, merge, write the sidecar with `writeSidecar`, refresh copies whose API values differ from
-   `immichReads` of the new sidecar, trash or restore copies after checking `isOffline` with `getAsset`, F2's
-   minimal sidecar for inbox sources, record the unit; dry run writes nothing, records nothing, acknowledges
-   nothing), then the daemon's `sync` job (watcher into `DirtyUnits`, full pass daily, each account's stream with
+   two titles are a conflict). `SyncedValues` (the base) gained `trashed`. Done: `src/sync/reconcile.ts`
+   (`reconcile(ctx, units)`: reads the sidecar and each copy, merges, writes the sidecar's changed fields, refreshes
+   every copy when the sidecar changed and any copy not in step with what it would read from it, mirrors trash from
+   online copies, makes F2's minimal sidecar in inbox sources, records the unit; a dry run writes, records and
+   acknowledges nothing), tested end to end with two accounts' copies (`reconcile.test.ts`). Left: the daemon's
+   `sync` job (watcher into `DirtyUnits`, full pass daily, each account's stream with
    the reconcile as `act`; `learnAllAssets` when an account has no assets yet or after a reset). Done too: `planWrite`
    writes `TagsList` where there's a title, so the title tag reaches Immich.
    Originally: the reconcile loop (section 5) and F1–F8, with the merge from `src/core/tags.ts`. Each copy's tags come from
