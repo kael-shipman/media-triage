@@ -48,7 +48,7 @@ test("units: last-synced values and the sidecar's stamp, kept between openings",
   const unit: UnitRecord = {
     path: "/media/a.jpg",
     sidecar: { size: 1234, mtimeMs: 1730000000123.456, ino: 42 },
-    synced: { rating: 3, title: "Lake day", description: null, creator: "Alex Example", tags: ["Places/Lake"], date: "2021:06:15 10:20:30+02:00", gps: null },
+    synced: { rating: 3, title: "Lake day", description: null, creator: "Alex Example", tags: ["Places/Lake"], date: "2021:06:15 10:20:30+02:00", gps: null, trashed: false },
     updated: "2026-11-04T12:00:00.000Z",
   };
   store.putUnits([unit, { ...unit, path: "/media/b.jpg", sidecar: undefined }]);

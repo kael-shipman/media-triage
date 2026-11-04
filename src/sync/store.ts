@@ -8,6 +8,7 @@
 // Every write is one transaction.
 
 import type { Database } from "bun:sqlite";
+import type { Base } from "../core/merge.ts";
 import type { FileStamp } from "../sidecars/sidecar.ts";
 
 export interface AssetRecord {
@@ -27,17 +28,10 @@ export interface AssetRecord {
   visibility: string;
 }
 
-/** The values a unit last had everywhere: the base the next merge compares each side with. */
-export interface SyncedValues {
-  rating: number | null;
+/** The values a unit last had everywhere: the base the next merge compares each side with (src/core/merge.ts). */
+export interface SyncedValues extends Base {
   title: string | null;
-  description: string | null;
   creator: string | null;
-  /** Immich's notation, without Darktable's own tags. */
-  tags: string[];
-  /** The capture time, with its offset when known. */
-  date: string | null;
-  gps: { latitude: number; longitude: number } | null;
 }
 
 export interface UnitRecord {

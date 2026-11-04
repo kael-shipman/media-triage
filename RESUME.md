@@ -140,7 +140,18 @@ What milestone 5 gives it (`src/sidecars/`, `src/core/xmp.ts`):
    and only then acknowledges. On `SyncResetV1` it acknowledges, forgets the account's assets and returns
    `reset: true`: the caller reads again (`learnAllAssets` can fill the store first). People, faces and albums' own
    events are acknowledged and otherwise left for milestone 7. Not yet run by the daemon (step 5).
-5. **The reconcile loop** (section 5) and F1–F8, with the merge from `src/core/tags.ts`. Each copy's tags come from
+5. **The reconcile loop** (in progress). Done: the pure merge, `src/core/merge.ts` (`mergeUnit(base, title, sides)`;
+   sides are Darktable's view of the sidecar and each copy through the API, each as `SideValues`; tags tag by tag
+   with the title as `Title/…`; rating, description, date, GPS to the latest change; F8 trash from online copies;
+   two titles are a conflict). `SyncedValues` (the base) gained `trashed`. Left: `src/sync/reconcile.ts` (read the
+   sidecar and each copy, merge, write the sidecar with `writeSidecar`, refresh copies whose API values differ from
+   `immichReads` of the new sidecar, trash or restore copies after checking `isOffline` with `getAsset`, F2's
+   minimal sidecar for inbox sources, record the unit; dry run writes nothing, records nothing, acknowledges
+   nothing), then the daemon's `sync` job (watcher into `DirtyUnits`, full pass daily, each account's stream with
+   the reconcile as `act`; `learnAllAssets` when an account has no assets yet or after a reset). Also needed: when a
+   title must reach Immich and the sidecar has no `TagsList`, write one (Immich would otherwise read
+   `hierarchicalSubject`, which doesn't hold the title tag).
+   Originally: the reconcile loop (section 5) and F1–F8, with the merge from `src/core/tags.ts`. Each copy's tags come from
    `getAsset` (`tags`). Writes to Immich in bulk (`refreshMetadata`, `trashAssets`, `restoreAssets`).
 6. **F1's setting** (whether the server reads new sidecars on refresh), and F8's offline check.
 

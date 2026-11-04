@@ -95,7 +95,7 @@ test("the full pass returns units without a record, or whose sidecar changed", a
   const root = join(dir, "media");
   for (const name of ["a.jpg", "a.jpg.xmp", "b.jpg", "c.mp4", "c.mp4.xmp", "notes.txt", ".hidden.jpg"]) touch(join(root, "x", name));
   touch(join(root, ".hidden", "d.jpg"));
-  const synced = { rating: null, title: null, description: null, creator: null, tags: [], date: null, gps: null };
+  const synced = { rating: null, title: null, description: null, creator: null, tags: [], date: null, gps: null, trashed: false };
   const updated = "2026-11-04T00:00:00.000Z";
   store.putUnits([
     { path: join(root, "x", "a.jpg"), sidecar: stampOf(join(root, "x", "a.jpg.xmp")), synced, updated },
