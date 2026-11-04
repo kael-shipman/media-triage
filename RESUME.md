@@ -13,16 +13,17 @@ session stops partway.
 - **Built:** the command line (`help`, `version`, `init`, `config`, `run`), the TOML configuration with every setting
   checked (unknown keys are errors), the state database with numbered migrations, the job scheduler (one job at a
   time), and logging (journal priorities under systemd).
-- **`run` starts and stops cleanly, but has no jobs yet.**
-- **Tests:** 54, all passing (`npx bun@1.4.4 test`), and the type check is clean.
+- **Upgrades:** `media-triage upgrade` (`--check`, `--to`), and the daemon's scheduled check, which exits with
+  status 75 after upgrading so systemd restarts it. Tested against a fake release server; the daemon's own path still
+  needs the end-to-end check in step 5, with real executables.
+- **`run` starts and stops cleanly. Its only job so far is the upgrade check.**
+- **Tests:** 81, all passing (`npx bun@1.4.4 test`), and the type check is clean.
 
 ## Next
 
-**Exactly what to do next:** milestone 1, step 3: upgrades. `src/upgrade.ts` picks a release (GitHub's releases API,
-by `track` and `prerelease`), downloads `media-triage-<os>-<arch>` and `SHA256SUMS`, checks the hash, runs the new
-executable's `version`, and swaps it in (DESIGN.md, section 11). Add the `upgrade` command (`--check`, `--to`) and
-the daemon's scheduled check (exit 75 to restart). Test it against a fake release server (`Bun.serve`) with a
-shell-script "executable".
+**Exactly what to do next:** milestone 1, step 4: the installer, `install.sh` at the repository's root (DESIGN.md,
+section 12). POSIX `sh`, so `curl … | sh -s -- [options]` works. Test it locally against a fake release server, with
+`--repo` pointing at it.
 
 ## Milestones
 
@@ -32,7 +33,7 @@ Each step ends with tests passing, a commit, and this file updated.
 1. [x] Repository, README, design, RESUME.
 2. [x] Command line (`help`, `version`, `init`, `config`, `run`), TOML configuration with validation, state database
    (`bun:sqlite`), logging.
-3. [ ] Upgrades (`upgrade`, and the daemon's scheduled check), tested against a local fake release server.
+3. [x] Upgrades (`upgrade`, and the daemon's scheduled check), tested against a local fake release server.
 4. [ ] The installer (`install.sh`).
 5. [ ] CI (`.github/workflows/ci.yml`) and releases (`release.yml`); a first pre-release to try the installer and an
    upgrade end to end.

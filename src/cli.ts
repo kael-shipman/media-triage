@@ -5,12 +5,11 @@ import exampleConfig from "../examples/config.toml" with { type: "text" };
 import { type Config, ConfigError, loadConfig } from "./config.ts";
 import { runDaemon } from "./daemon.ts";
 import { formatDuration } from "./duration.ts";
+import { EXIT } from "./exit.ts";
 import { LEVELS, type Level, log, setLogLevel } from "./log.ts";
 import { defaultConfigPath } from "./paths.ts";
-import { VERSION } from "./version.ts";
-
-/** Exit statuses. */
-export const EXIT = { ok: 0, error: 1, usage: 2 } as const;
+import { UpgradeError, upgrade } from "./upgrade.ts";
+import { IS_COMPILED, VERSION } from "./version.ts";
 
 const HELP = `media-triage ${VERSION}
 Keeps a photo inbox, an archive, Immich and Darktable in step, and files triaged photos.
@@ -21,12 +20,15 @@ Commands:
   run        Run the daemon
   init       Write a starter configuration, unless there's one already
   config     Check the configuration, and print it with the defaults filled in
+  upgrade    Upgrade to the newest release the configuration's [upgrade] track allows
   version    Print the version
   help       Print this help
 
 Options:
   --config FILE      The configuration file (default: ${defaultConfigPath()})
   --dry-run          (run) Do everything except changing anything
+  --check            (upgrade) Only report whether there's a newer release
+  --to VERSION       (upgrade) Install this release instead, even an older one
   --log-level LEVEL  debug, info, warn or error (default: the configuration's, or info)
 
 Documentation: https://github.com/kael-shipman/media-triage`;
@@ -34,6 +36,8 @@ Documentation: https://github.com/kael-shipman/media-triage`;
 const OPTIONS = {
   config: { type: "string" },
   "dry-run": { type: "boolean" },
+  check: { type: "boolean" },
+  to: { type: "string" },
   "log-level": { type: "string" },
   help: { type: "boolean", short: "h" },
   version: { type: "boolean" },
@@ -44,6 +48,7 @@ const COMMAND_OPTIONS: Record<string, readonly string[]> = {
   run: ["dry-run"],
   init: [],
   config: [],
+  upgrade: ["check", "to"],
   version: [],
   help: [],
 };
@@ -61,7 +66,7 @@ export async function main(argv: string[]): Promise<number> {
   const command = values.help ? "help" : (positionals[0] ?? "help");
   if (!(command in COMMAND_OPTIONS)) return usage(`Unknown command: ${command}`);
   if (positionals.length > 1) return usage(`Unexpected argument: ${positionals[1]}`);
-  for (const option of ["dry-run"] as const) {
+  for (const option of ["dry-run", "check", "to"] as const) {
     if (values[option] !== undefined && !COMMAND_OPTIONS[command]!.includes(option)) {
       return usage(`--${option} doesn't apply to ${command}`);
     }
@@ -85,6 +90,8 @@ export async function main(argv: string[]): Promise<number> {
         return init(configFile);
       case "config":
         return showConfig(loadConfig(configFile));
+      case "upgrade":
+        return await upgradeNow(loadConfig(configFile, { optional: true }), { check: values.check ?? false, to: values.to });
       case "run": {
         const config = loadConfig(configFile);
         if (!logLevel) setLogLevel(config.log.level);
@@ -92,7 +99,7 @@ export async function main(argv: string[]): Promise<number> {
       }
     }
   } catch (error) {
-    if (error instanceof ConfigError) {
+    if (error instanceof ConfigError || error instanceof UpgradeError) {
       log.error(error.message);
       return EXIT.error;
     }
@@ -131,5 +138,31 @@ function showConfig(config: Config): number {
     upgrade: { ...upgrade, intervalMs: undefined, interval: formatDuration(upgrade.intervalMs) },
   };
   console.log(JSON.stringify(readable, null, 2));
+  return EXIT.ok;
+}
+
+async function upgradeNow(config: Config, options: { check: boolean; to?: string }): Promise<number> {
+  if (!options.check && !IS_COMPILED) {
+    log.error("This runs from source, so there's no executable to upgrade. `--check` still works.");
+    return EXIT.error;
+  }
+  const result = await upgrade({
+    ...config.upgrade,
+    executable: process.execPath,
+    current: IS_COMPILED ? VERSION : "0.0.0",
+    checkOnly: options.check,
+    to: options.to,
+  });
+  switch (result.status) {
+    case "current":
+      console.log(`media-triage ${VERSION} is the newest release the "${config.upgrade.track}" track allows.`);
+      break;
+    case "available":
+      console.log(`media-triage ${result.to} is available (running ${VERSION}). Install it with \`media-triage upgrade\`.`);
+      break;
+    case "upgraded":
+      console.log(`Upgraded media-triage from ${result.from} to ${result.to}. If it runs as a service, restart it to use the new version.`);
+      break;
+  }
   return EXIT.ok;
 }
