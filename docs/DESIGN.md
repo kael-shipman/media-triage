@@ -150,6 +150,27 @@ All of a unit's work happens in one place, in this order, so nothing races:
 
 If the state is lost, merge as a union, which never drops a tag, and report it.
 
+**How it's built** (`src/sync/reconcile.ts`, `src/core/merge.ts`):
+- **The sides** are Darktable's view of the sidecar (`darktableReads`) and each copy, read through the API
+  (`getAsset`). Immich's view of the sidecar isn't a side: it's what some copy wrote, and that copy is one. Each value
+  is compared in one form: tags in Immich's notation with the title as its tag, no rating or an empty description as
+  null, dates by wall time.
+- **The base** is the unit's last-synced record. Tags merge tag by tag against it; the rating, description, date and
+  GPS go to the latest change (a side that differs from the base, the latest by the sidecar's mtime or the asset's
+  `updatedAt`); trash follows a copy that isn't offline (F8). Without a base: the union of tags, and the latest value
+  anyone holds.
+- **Telling Immich:** when the sidecar is written, every copy is refreshed; otherwise only copies that don't hold what
+  they'd read from the sidecar (`immichReads`), such as another account's copy after an edit in Immich. Refreshes,
+  trashes and restores are batched per account.
+- **Not yet:** removing GPS or a date (a side that drops one isn't acted on, so nothing is lost), and per-account
+  state, named faces and orphans (milestone 7).
+- **In the daemon** (`src/sync/job.ts`): the full pass at start and daily; the `sync` job each minute and after every
+  change the watcher sees, reading each account's stream (a batch is reconciled before it's acknowledged), then up to
+  200 units that have been quiet for 2 seconds, so a first run over the whole archive doesn't hold up other jobs.
+  Without exiftool, the daemon stops, saying how to install it.
+- **A dry run** reads and merges, logs what it would write, and writes, records and acknowledges nothing. It reads
+  each stream once per start, since unacknowledged streams would otherwise be read whole each minute.
+
 ## 6. Sync rules
 
 - **F1. Refresh.** Any sidecar that changed, for any reason, leads to a metadata refresh of every copy with that path,
@@ -161,8 +182,9 @@ If the state is lost, merge as a union, which never drops a tag, and report it.
   - **Fixed in the server, not worked around here** (decided 2026-11-04): the author's fork
     ([kael-shipman/immich](https://github.com/kael-shipman/immich)) gets a small change so that `refresh-metadata`
     looks for a sidecar first (it queues `SidecarCheck`, whose follow-up job is the extraction), a fix upstream could
-    take too. A setting, like `mirrors_face_corrections`, says whether the server has it. On a server without it, the
-    daemon still refreshes, and sidecars that appeared after indexing stay unread there.
+    take too. The setting `immich.reads_new_sidecars` says whether the server has it. On a server without it, the
+    daemon still refreshes, sidecars that appeared after indexing stay unread there, and it warns when it makes one
+    (F2).
 - **F2. Creator.** A file in an inbox source with no `dc:creator` gets the source's creator. An existing creator is
   never overwritten. Most new photos have no sidecar yet, so create a minimal `<file>.<ext>.xmp`, the name both tools
   look for first. It's written under a hidden temporary name and linked into place, which fails if a sidecar appeared

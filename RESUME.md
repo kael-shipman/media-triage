@@ -8,7 +8,7 @@ you're about to build would change it, ask the author first.
 session stops partway. Each step ends with tests passing, the type check clean, a commit and a push; CI must stay
 green.
 
-**Last updated:** 2026-11-04. Milestones 1–5 of 8 are done. **Next: milestone 6, sync.**
+**Last updated:** 2026-11-04. Milestones 1–6 of 8 are done. **Next: milestone 7** (F9–F11), below.
 
 ## Working on it
 
@@ -51,9 +51,11 @@ green.
 | Account upkeep, at start and every full pass: accounts, the cluster group, libraries, the check, people | `src/upkeep/` | 4 |
 | A sidecar's fields, what Immich and Darktable each read from them, and planning writes (F2–F10); face regions from Immich's faces | `src/core/xmp.ts`, `regions.ts` | 5 |
 | exiftool (one process, the system's in a release), the namespace's config, reading, writing and creating sidecars | `src/sidecars/` | 5 |
+| The merge (`mergeUnit`) | `src/core/merge.ts` | 6 |
+| Sync: state (`SyncStore`), covered folders, the watcher, the full pass, each account's stream, the reconcile, the daemon's jobs | `src/sync/` | 6 |
 
-**The daemon's jobs so far:** the upgrade check, and account upkeep. Sidecars can be read and written, but the daemon
-doesn't start exiftool yet: nothing syncs or files.
+**The daemon's jobs:** account upkeep and the check, the full pass and sync (F1–F8 without F5), and the upgrade check.
+Nothing files yet, and per-account state, named faces and orphans aren't synced yet.
 
 **Found in Immich 3.3.5 while building milestones 3 and 4** (each is in DESIGN.md, and each has a test):
 - the sync stream refuses `AssetsV1` (use `AssetsV2`), carries no paths, and `AssetFacesV3` covers the whole cluster
@@ -98,7 +100,23 @@ These shape milestone 6; DESIGN.md has each.
   paths) plus the inbox's sources, not everything under `paths.archive`, which is only where filing puts files.
 - **The check moves out of upkeep** when sync is built (milestone 6, step 1 below).
 
-## Next: milestone 6, sync
+## Next: milestone 7, F9–F11
+
+DESIGN.md section 6. The reconcile (`src/sync/reconcile.ts`) is where each goes; the stream already acknowledges these
+events without acting on them (`src/sync/stream.ts`, `assetOf`).
+1. **F9, per-account state:** each copy's `isFavorite`, `visibility` and album memberships (`AlbumToAssetV1`,
+   `AlbumToAssetDeleteV1`, `AlbumV2` for names) into `Wanted.accounts` (keyed by user ID; `planWrite` already writes
+   only what isn't the default). Album memberships need a store table (asset ↔ album, album names).
+2. **F10, named faces:** `AssetFaceV3` (faces on every asset in the cluster group) and `PersonV1` (names) into
+   `People|<name>` tags and regions (`regionFromFace`, with `exifInfo.orientation`). The state records which tags the
+   daemon made, so hand-made `People|…` tags are never removed. Videos get tags only. A store table for faces.
+3. **F11, orphan sidecars:** `src/core/orphans.ts` has the rules; the full pass sees media go. Seen, then gone for the
+   grace period (1 h): delete; never seen: report; conflict copies: report.
+4. **Not done in milestone 6, worth doing:** removing GPS or a date when a side drops one (now ignored, so nothing is
+   lost); a test that the daemon's watcher-to-reconcile path works without the development Immich (the smoke test in
+   step 7 below was by hand).
+
+## Milestone 6, sync (done 2026-11-04)
 
 DESIGN.md sections 3, 5 and 6 (F1–F8, without F5) and 13. Read "Decided by the author" above first.
 
@@ -140,7 +158,7 @@ What milestone 5 gives it (`src/sidecars/`, `src/core/xmp.ts`):
    and only then acknowledges. On `SyncResetV1` it acknowledges, forgets the account's assets and returns
    `reset: true`: the caller reads again (`learnAllAssets` can fill the store first). People, faces and albums' own
    events are acknowledged and otherwise left for milestone 7. Not yet run by the daemon (step 5).
-5. **The reconcile loop** (in progress). Done: the pure merge, `src/core/merge.ts` (`mergeUnit(base, title, sides)`;
+5. [x] **The reconcile loop** (done 2026-11-04). Done: the pure merge, `src/core/merge.ts` (`mergeUnit(base, title, sides)`;
    sides are Darktable's view of the sidecar and each copy through the API, each as `SideValues`; tags tag by tag
    with the title as `Title/…`; rating, description, date, GPS to the latest change; F8 trash from online copies;
    two titles are a conflict). `SyncedValues` (the base) gained `trashed`. Done: `src/sync/reconcile.ts`
@@ -153,7 +171,13 @@ What milestone 5 gives it (`src/sidecars/`, `src/core/xmp.ts`):
    `sync` runs each minute and after every change the watcher sees: each account's stream (learning all its assets
    first when the store has none, and again after a reset), then up to 200 dirty units once quiet for 2 s. A dry run
    reads the streams once per start. Tests: 354 unit, 398 with the development Immich (twice in a row).
-6. **F1's setting** (whether the server reads new sidecars on refresh), and F8's offline check.
+6. [x] **F1's setting** (done 2026-11-04): `immich.reads_new_sidecars` (default false); without it, the reconcile
+   warns when it makes a sidecar Immich won't read. F8's offline check is in the merge and the reconcile (an offline
+   copy is never a source of a trash, and never restored).
+7. [x] **Smoke test** (2026-11-04): the daemon, run live against the development Immich with one account, created the
+   library, learned the asset, wrote the title tag into the sidecar (it reached Immich), and a rating written to the
+   sidecar on disk while it ran reached Immich through the watcher; SIGTERM stopped it cleanly. A unit can be refreshed
+   twice in a row while Immich catches up (harmless).
 
 Before anything runs against the author's real files: a dry run over everything, and the author's approval of the
 first live write (DESIGN.md section 9).
@@ -213,7 +237,8 @@ first live write (DESIGN.md section 9).
 5. [x] Face regions (F10).
 6. [x] Fixtures, made by Darktable and Immich themselves.
 
-**6. Sync:** the check as its own job, state, the watcher, the sync stream consumer, the reconcile loop, F1–F8.
+**6. Sync** (`src/sync/`, `src/core/merge.ts`), done 2026-11-04: the check as its own job, state, the watcher and
+full pass, the sync stream consumer, the reconcile loop, F1–F8 (F5 dropped), the daemon's jobs, a live smoke test.
 
 **7. F9–F11:** Immich-only state, named faces, orphan sidecars.
 

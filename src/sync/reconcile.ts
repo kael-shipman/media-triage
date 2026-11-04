@@ -32,6 +32,8 @@ export interface ReconcileReport {
   written: { unit: string; fields: string[] }[];
   /** Minimal sidecars made for F2. */
   created: string[];
+  /** Of those, the ones whose copies won't read them: the server doesn't read new sidecars (F1). */
+  unread: string[];
   /** Copies told to read their sidecar again (F1). */
   refreshed: number;
   /** Copies trashed and restored to mirror another (F8), by asset ID. */
@@ -95,7 +97,7 @@ function sourceOf(config: Config, unit: string): { creator: string } | undefined
 }
 
 export async function reconcile(ctx: ReconcileContext, units: readonly string[]): Promise<ReconcileReport> {
-  const report: ReconcileReport = { units: units.length, written: [], created: [], refreshed: 0, trashed: [], restored: [], conflicts: [], waiting: [] };
+  const report: ReconcileReport = { units: units.length, written: [], created: [], unread: [], refreshed: 0, trashed: [], restored: [], conflicts: [], waiting: [] };
   const refresh = new Map<OpenAccount, Set<string>>();
   const trash = new Map<OpenAccount, Set<string>>();
   const restore = new Map<OpenAccount, Set<string>>();
@@ -140,6 +142,12 @@ export async function reconcile(ctx: ReconcileContext, units: readonly string[])
     });
   }
   for (const { unit, problem } of report.conflicts) log.warn("conflict: left as it is", { unit, problem });
+  if (report.unread.length > 0) {
+    log.warn("Immich won't read these new sidecars until the server reads sidecars made after indexing (reads_new_sidecars, F1)", {
+      count: report.unread.length,
+      first: report.unread[0],
+    });
+  }
   if (ctx.dryRun) for (const { unit, fields } of report.written.slice(0, 20)) log.info("would write", { unit, fields: fields.join(",") });
   return report;
 }
@@ -162,6 +170,7 @@ async function reconcileUnit(
     if (created.status === "created") sidecar = created.sidecar;
     if (created.status === "dry-run") fields = { creator: [source.creator] };
     if (created.status !== "exists") report.created.push(unit);
+    if (created.status !== "exists" && !ctx.config.immich.readsNewSidecars && store.assetsAt(unit).length > 0) report.unread.push(unit);
     else sidecar = await readSidecar(exiftool, sidecarPath);
     fields = sidecar?.fields ?? fields;
   }

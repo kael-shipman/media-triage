@@ -39,6 +39,11 @@ path_map = [
 # does, with IMMICH_SHARE_DERIVED_DATA=true). If it does, filing corrects faces on one copy only.
 mirrors_face_corrections = false
 
+# Whether the server's metadata refresh reads a sidecar that appeared after it indexed the file. Immich 3.3 doesn't:
+# it reads only sidecars it found when indexing, so the minimal sidecars media-triage makes for new phone photos
+# aren't read until the file is indexed again. The kael-shipman/immich fork fixes it. Without it, media-triage warns.
+reads_new_sidecars = false
+
 # One block per Immich account. Log each in once with `media-triage login <name>`.
 [[immich.accounts]]
 name = "alex"                 # a label, used in logs and for the session file

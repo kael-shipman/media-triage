@@ -83,3 +83,8 @@ describe("mistakes it catches", () => {
     expect(() => parse(toml)).toThrow(message);
   });
 });
+
+test("reads_new_sidecars defaults to false", () => {
+  expect(parseConfig({}, null).immich.readsNewSidecars).toBe(false);
+  expect(parseConfig({ immich: { reads_new_sidecars: true } }, null).immich.readsNewSidecars).toBe(true);
+});
