@@ -22,15 +22,15 @@ interface FakeRelease {
 let releases: FakeRelease[] = [];
 const server = Bun.serve({
   port: 0,
-  fetch(request) {
-    const { pathname } = new URL(request.url);
+  fetch(request): Response {
+    const { origin, pathname } = new URL(request.url);
     if (pathname === "/api/v3/repos/owner/media-triage/releases") {
       return Response.json(
         releases.map((release) => ({
           tag_name: release.tag,
           draft: release.draft ?? false,
           prerelease: release.prerelease ?? false,
-          assets: [assetName(), CHECKSUMS].map((name) => ({ name, browser_download_url: `${server.url}download/${release.tag}/${name}` })),
+          assets: [assetName(), CHECKSUMS].map((name) => ({ name, browser_download_url: `${origin}/download/${release.tag}/${name}` })),
         })),
       );
     }
