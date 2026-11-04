@@ -1,8 +1,11 @@
 import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, normalize } from "node:path";
+import type { PathMapping } from "./core/path-map.ts";
 import { parseDuration } from "./duration.ts";
 import { LEVELS, type Level } from "./log.ts";
 import { defaultStateDir, expandHome } from "./paths.ts";
+
+export type { PathMapping };
 
 export const DEFAULT_REPO = "https://github.com/kael-shipman/media-triage";
 
@@ -14,13 +17,6 @@ export interface Source {
   folder: string;
   /** The creator (`dc:creator`) its files get when they have none. */
   creator: string;
-}
-
-export interface PathMapping {
-  /** A path prefix as Immich sees it, ending in "/". */
-  immich: string;
-  /** The same place as this machine sees it, ending in "/". */
-  local: string;
 }
 
 export interface Account {
@@ -125,6 +121,8 @@ export function parseConfig(raw: unknown, file: string | null): Config {
     table.done();
     return mapping;
   });
+  unique(pathMap.map((mapping) => mapping.immich), "immich.path_map: immich");
+  unique(pathMap.map((mapping) => mapping.local), "immich.path_map: local");
   const mirrorsFaceCorrections = immichTable.bool("mirrors_face_corrections", false);
 
   const accounts = immichTable.tables("accounts").map((table) => {

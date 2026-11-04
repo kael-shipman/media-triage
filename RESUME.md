@@ -56,7 +56,16 @@ session stops partway.
   read, nothing after acknowledging, favorite, trash, album, person and face changes, a forced reset, and the
   `AssetsV1` refusal. Immich's own jobs update a person shortly after a face is added, so the stream reports the
   person again; tests wait for those jobs.
-- **Tests:** 231 without Immich, all passing (`npx bun@1.4.4 test`), and 242 with the development Immich
+- **Assets and the path map** (milestone 3, steps 2 and 3): `src/immich/assets.ts`: `libraryPages` and
+  `searchPages` (structured search, pages of 1,000), `findByPaths` (500 paths a search), `getAsset`, and bulk
+  `refreshMetadata`, `trashAssets`, `restoreAssets`, `setFavorite`, `setVisibility` (1,000 IDs a request; Immich's body
+  limit is above 4 MB). `src/core/path-map.ts`: Immich's paths to local ones and back, longest folder first. Tested
+  against the development Immich, which also showed:
+  - searches include trashed, archived, hidden and offline assets, but not locked ones; a locked asset reads like a
+    missing one without the PIN;
+  - a missing file becomes offline **and** trashed, and both clear when it's back (the F8 question below);
+  - `refresh-metadata` ignores a sidecar that appeared after indexing (the F1 question below).
+- **Tests:** 237 without Immich, all passing (`npx bun@1.4.4 test`), and 255 with the development Immich
   (`MEDIA_TRIAGE_IMMICH_TESTS=1`). The type check is clean, and covers `test/` too.
 - **Design updated 2026-11-04** (approved by the author): sync covers the whole archive, not just the inbox, and a
   new section 13 (scale) says how that stays cheap. Section 3 corrected from 3.3.5's source: `AssetsV2` and
@@ -66,20 +75,42 @@ session stops partway.
 ## Next
 
 **Exactly what to do next:** milestone 3, the Immich client, from step 2. Steps 1 and 2's login and sync stream are done:
-`bun run immich up`, then `MEDIA_TRIAGE_IMMICH_TESTS=1 bun test`. Next are the asset, album, face, people, library and
-cluster-group calls, each in bulk where the API allows (DESIGN.md, section 13).
+`bun run immich up`, then `MEDIA_TRIAGE_IMMICH_TESTS=1 bun test`. The asset calls and the path map are done. Next are the
+album, face, people, library and cluster-group calls, each in bulk where the API allows (DESIGN.md, section 13).
 1. [x] **A development Immich** for integration tests (`test/immich/`).
 2. **`src/immich/`:** wrap what the daemon needs:
    - [x] login and sessions, and `media-triage login <account>`;
    - [x] the sync stream (`POST /sync/stream`, JSON lines) and acknowledgements (`POST /sync/ack`);
-   - **next:** assets by original path, metadata refresh (the asset jobs endpoint), trash and restore, favorite and
-     visibility, albums, faces (`GET`/`POST`/`PUT`/`DELETE /faces`), people and people sharing, libraries
+   - [x] assets by original path, metadata refresh (the asset jobs endpoint), trash and restore, favorite and
+     visibility;
+   - **next:** albums, faces (`GET`/`POST`/`PUT`/`DELETE /faces`), people and people sharing, libraries
      (create, update exclusion patterns, scan), and cluster groups (invite, accept).
-3. **The path map:** translate between Immich's paths and local ones, both ways (`immich.path_map`).
+3. [x] **The path map:** translate between Immich's paths and local ones, both ways (`immich.path_map`).
 
 Check each call's request and response shapes in the SDK; the server's `/api/spec` is the reference.
 Mind DESIGN.md section 13: list in bulk (search pages of 1,000), write in bulk (every call that takes a list of IDs),
 and read the sync stream line by line.
+
+**Open question for the author, F1 (needed by milestone 6):** a metadata refresh re-reads only a sidecar Immich
+already knows. Immich looks for sidecars when it first indexes a file, and `refresh-metadata` doesn't look again
+(checked in the source and tested: `src/immich/assets.test.ts`). So every new phone photo whose sidecar F2 creates
+after Immich indexed it would never be read, and the same goes for Darktable's first sidecar on an archive photo.
+The API has no per-asset way to look again. Options:
+- (a) **The fork:** make `refresh-metadata` look for a sidecar first (`asset.service.ts`, `run`: queue
+  `SidecarCheck`, whose follow-up job is the extraction). One line, and a likely upstream fix too. media-triage would
+  get a setting, like `mirrors_face_corrections`.
+- (b) **Stock Immich:** the admin's "discover sidecars" queue (`PUT /api/queues/sidecar`, `start`, not forced),
+  throttled. It re-extracts the metadata of every asset Immich knows no sidecar for, in every account (even when it
+  finds none), so it's cheap only once almost every asset has a known sidecar. That means creating minimal sidecars
+  for all media without one, archive included: a one-time burst of new files that sync everywhere.
+- (c) Both: (a) where the server has it, (b) otherwise.
+
+**Open question for the author, safety (needed by milestone 6, F8):** in 3.3.5, a library file that goes offline
+(missing, or newly excluded) gets `isOffline` **and `deletedAt`** (`library.service.ts`, around line 549), and coming
+back online clears both. The sync stream has no `isOffline`, so going offline looks exactly like being trashed. As F8
+is written, a change to one account's exclusion patterns would trash the other accounts' online copies, and emptying
+their trash 30 days later deletes the original files. Proposal: F8 mirrors a trash or restore only after checking
+through the API that the copy isn't offline, and never mirrors going offline or coming back online.
 
 **Open question for the author** (doesn't block milestone 3; needed by milestone 6, the watcher): which folders count as
 "the archive" for watching and the full pass. `paths.archive` can be the root of a larger tree (Setup files, backups),

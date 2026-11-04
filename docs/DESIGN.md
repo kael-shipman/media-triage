@@ -43,7 +43,7 @@ with `--config` or `MEDIA_TRIAGE_CONFIG`. [examples/config.toml](../examples/con
 |---|---|
 | `[paths]` | The inbox, the archive, and the state folder |
 | `[[sources]]` | Each inbox subfolder that's a source, with the creator its files get. Subfolders that aren't listed are left alone |
-| `[immich]` | The server's URL, and a path map from Immich's paths (inside its container) to the daemon's |
+| `[immich]` | The server's URL, and a path map from Immich's paths (inside its container) to the daemon's, both ways (`src/core/path-map.ts`; the longest matching folder wins) |
 | `[[immich.accounts]]` | Each account: a name used in logs and for its session file, and whether it's the admin |
 | `[[immich.libraries]]` | Each account's libraries: folders, extra exclusions, and an optional "dated on or after" limit (section 8) |
 | `[timing]` | Settle time before filing (5 min), orphan grace period (1 h), full pass (24 h) |
@@ -74,6 +74,8 @@ video. Units in the archive count as much as units in the inbox (section 1).
    **No paths:** an asset in the stream has its file name but not its path. The daemon looks up the path of each
    asset it hasn't seen before, and keeps every asset's ID and path in its state. A library asset's path never changes,
    since its identity is a hash of the path (`library.service.ts`), so each is looked up once (section 13).
+   A locked asset is the exception: without the account's PIN, Immich leaves it out of searches and answers for it
+   as for a missing one. So the daemon knows a locked asset's path only if it saw the asset before it was locked.
 
    **Acknowledging:** each line of the stream carries an acknowledgement (`<type>|<id>`). The server keeps one
    checkpoint per type, so after acting on a batch (up to 1,000 changes) the daemon acknowledges the last line of each
@@ -138,6 +140,10 @@ If the state is lost, merge as a union, which never drops a tag, and report it.
 - **F1. Refresh.** Any sidecar that changed, for any reason, leads to a metadata refresh of every copy with that path,
   in each account, batched. Immich never notices a sidecar-only change by itself: its watcher and scans look only at
   media files.
+  - **A refresh re-reads only a sidecar Immich already knows** (checked against 3.3.5). It looks for sidecars when it
+    first indexes a file (`SidecarCheck`), and `refresh-metadata` doesn't look again (`asset.service.ts`, `run`), so
+    a sidecar that appeared later, such as one made by F2 just after Immich indexed the photo, isn't read. How the
+    daemon gets Immich to find it is open (RESUME.md).
 - **F2. Creator.** A file in an inbox source with no `dc:creator` gets the source's creator. An existing creator is
   never overwritten. Most new photos have no sidecar yet, so create a minimal `<file>.<ext>.xmp`.
 - **F3. Title.** The tag `Title/<title>` (Immich) and `dc:title` (Darktable) stay equal.
@@ -163,6 +169,9 @@ If the state is lost, merge as a union, which never drops a tag, and report it.
   - Tags merge tag by tag. For the rating, title and description, the latest change wins.
 - **F8. Trash.** Trashing or restoring one copy does the same to the others, with each owner's session. Emptying
   either trash deletes the file, and the other copies go offline.
+  - **Offline looks like trash** (checked against 3.3.5): a library file that goes missing or is newly excluded gets
+    `isOffline` and `deletedAt` (`library.service.ts`), and coming back clears both. The sync stream has no
+    `isOffline`. How F8 tells the two apart is open (RESUME.md).
 - **F9. Immich-only state, in the sidecar.** For each account: favorite, visibility (archived, locked) and album
   memberships (the album's ID and name).
   - Stored in a namespace of the daemon's own, keyed by account, and written when they change.
@@ -319,7 +328,8 @@ or a library.
   - `src/main.ts`: the command line;
   - `src/core/`: the pure rules, without I/O;
   - `src/immich/`: the Immich client: one `ImmichClient` per account's session, wrapping `@immich/sdk` (pinned to the
-    server's version), plus the sessions and `login`, and the sync stream (`sync.ts`, read with `fetch`, since the
+    server's version), plus the sessions and `login`, assets (`assets.ts`: listing, finding by path, and bulk
+    changes), and the sync stream (`sync.ts`, read with `fetch`, since the
     SDK's `getSyncStream` reads the whole response as text);
   - each module's tests sit beside it (`*.test.ts`).
   - `test/immich/`: a development Immich for the integration tests (`compose.yml`, started and stopped by `dev.ts`),

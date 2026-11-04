@@ -67,6 +67,7 @@ describe("mistakes it catches", () => {
     ['[[sources]]\nfolder = "A"\ncreator = "C"\n[[sources]]\nfolder = "A"\ncreator = "D"', '"A" appears twice'],
     ['[filing]\nphotos = "../out"', "filing.photos must be a folder inside the archive"],
     ['[immich]\nurl = "ftp://x"', "immich.url must be an http or https URL"],
+    ['[immich]\npath_map = [{ immich = "/a", local = "/b" }, { immich = "/a/", local = "/c" }]', 'immich.path_map: immich: "/a/" appears twice'],
     ['[[immich.accounts]]\nname = "Alex"\nemail = "a@b"', "immich.accounts[0].name must be lowercase"],
     ['[[immich.accounts]]\nname = "a"\nemail = "nope"', "isn't an email address"],
     ['[[immich.accounts]]\nname = "a"\nemail = "a@b"\nadmin = true\n[[immich.accounts]]\nname = "b"\nemail = "b@b"\nadmin = true', "only one account can be the admin"],
