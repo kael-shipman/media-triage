@@ -6,7 +6,7 @@ for) and [docs/DESIGN.md](docs/DESIGN.md) (how it works).
 **Update this file after every completed step,** not just at the end of a session, so work can be picked up if a
 session stops partway.
 
-**Last updated:** 2026-11-03.
+**Last updated:** 2026-11-04.
 
 ## Where things stand
 
@@ -38,6 +38,10 @@ session stops partway.
   - `orphans.ts`: which media file a sidecar belongs to, Darktable duplicates included (F11).
 - **`run` starts and stops cleanly. Its only job so far is the upgrade check.**
 - **Tests:** 214, all passing (`npx bun@1.4.4 test`), and the type check is clean.
+- **Design updated 2026-11-04** (approved by the author): sync covers the whole archive, not just the inbox, and a
+  new section 13 (scale) says how that stays cheap. Section 3 corrected from 3.3.5's source: `AssetsV2` and
+  `AlbumsV2` (3.3.5 refuses `AssetsV1`), no paths in the stream (looked up once per asset, in bulk where there are
+  many), `AssetFacesV3` covers the cluster group, and `SyncResetV1`.
 
 ## Next
 
@@ -58,6 +62,13 @@ session stops partway.
 3. **The path map:** translate between Immich's paths and local ones, both ways (`immich.path_map`).
 
 Check each call's request and response shapes in the SDK; the server's `/api/spec` is the reference.
+Mind DESIGN.md section 13: list in bulk (search pages of 1,000), write in bulk (every call that takes a list of IDs),
+and read the sync stream line by line.
+
+**Open question for the author** (doesn't block milestone 3; needed by milestone 6, the watcher): which folders count as
+"the archive" for watching and the full pass. `paths.archive` can be the root of a larger tree (Setup files, backups),
+and watching all of it is wasted work. Proposal: the folders of every configured library, mapped to local paths, plus
+the inbox sources.
 
 ## Milestones
 

@@ -32,7 +32,8 @@ and it's filed into the archive with nothing lost.
 
 One daemon, running where the files and Immich are:
 - **Sync:** keeps each sidecar, Darktable's fields and every Immich copy of the file in step, and tells Immich to
-  re-read sidecars that changed. That covers ratings, tags, titles, descriptions, creators, rejects and trash.
+  re-read sidecars that changed. It covers the whole archive, not just the inbox: a photo filed years ago can still
+  get a new tag or a named face. That covers ratings, tags, titles, descriptions, creators, rejects and trash.
 - **Records what Immich keeps only in its database:** each account's favorites, archiving and albums, and the named
   faces, kept in the sidecar. Named faces also become `People|<name>` tags.
 - **Filing:** moves what's tagged `Promote` from the inbox into the archive, named like the export preset. It then

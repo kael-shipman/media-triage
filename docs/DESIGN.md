@@ -18,6 +18,11 @@ One long-running program. It's started with an inbox folder and an archive folde
   people and names (section 8);
 - upgrades itself (section 11).
 
+**The whole archive, not just the inbox:** someone can tag, rate, title or name a face on a photo filed years ago, in
+either tool or any account. So sync, the Immich-only state, named faces and orphan cleanup (sections 5 and 6) cover
+every photo and video in the archive as well as in the inbox. Only filing (section 7) is limited to the inbox. That
+means tens of thousands of files and assets, and section 13 says how the daemon keeps that cheap.
+
 **Why one program:** these functions act on the same files and the same Immich assets, in a set order: merge, then
 file. Separate tools would race each other. For example, a title and `Promote` might be added together, or a sidecar
 write might land after a move. One process with one state database removes the races.
@@ -52,16 +57,32 @@ database, the Immich sessions and the logs. **Never put it inside a synced folde
 ## 3. Finding work
 
 Changes come from three places. Each change marks a **unit** dirty: a media file, its sidecar, and a Live Photo's
-video.
+video. Units in the archive count as much as units in the inbox (section 1).
 
 1. **Files:** inotify on the inbox and the archive, with a watch per folder. It sees files arriving from the phones,
    Darktable's sidecars, and Immich's sidecar writes. A full pass at start, and then daily, catches anything missed.
-2. **Immich, per account: its sync stream** (`POST /api/sync/stream`), the feed of changes the phone apps use. The
-   daemon acknowledges each change after acting on it, so a restart resumes where it stopped. It reports:
-   - `AssetsV1`: trash (`deletedAt`), `isFavorite`, `visibility` (archived, locked), the library and original path;
+2. **Immich, per account: its sync stream** (`POST /api/sync/stream`), the feed of changes the phone apps use. It
+   asks for these types, all current in Immich 3.3 (which refuses `AssetsV1`: `sync.service.ts`, `syncAssetsV1`):
+   - `AssetsV2`: trash (`deletedAt`), `isFavorite`, `visibility` (archived, locked), the library, the Live Photo's
+     video;
    - `AssetExifsV1`: rating, description, dates;
-   - `AlbumsV1` and `AlbumToAssetsV1`: albums and their assets;
+   - `AlbumsV2` and `AlbumToAssetsV1`: albums and their assets;
    - `PeopleV1` and `AssetFacesV3`: people and their names, and each face's person, box, source and deletion.
+     `AssetFacesV3` covers every asset in the account's cluster group, so once the accounts share a group, each
+     account's stream also reports the faces on the other accounts' copies.
+
+   **No paths:** an asset in the stream has its file name but not its path. The daemon looks up the path of each
+   asset it hasn't seen before, and keeps every asset's ID and path in its state. A library asset's path never changes,
+   since its identity is a hash of the path (`library.service.ts`), so each is looked up once (section 13).
+
+   **Acknowledging:** each line of the stream carries an acknowledgement (`<type>|<id>`). The server keeps one
+   checkpoint per type, so after acting on a batch the daemon acknowledges the last line of each type, including the
+   stream's closing `SyncCompleteV1`. A restart resumes where it stopped.
+
+   **Resets:** instead of changes, the server can send `SyncResetV1`. It does when the session was flagged for a
+   reset, or when its last completed sync is more than 30 days old (`sync.service.ts`, `needsFullSync`), since older
+   changes may have left its audit tables. The daemon acknowledges the reset, which clears the session's checkpoints,
+   reads the whole account again as on a first run, and logs it.
 
    Tags have no sync type. A tag change reaches the daemon as Immich's own sidecar write (point 1), and the merge
    reads each copy's tags through the API.
@@ -93,8 +114,8 @@ All of a unit's work happens in one place, in this order, so nothing races:
 3. **Write** only the fields that changed to the sidecar. Stat the file again just before; if it changed in the
    meantime, leave the unit for the next pass.
 4. **Tell Immich:** refresh the metadata of every copy whose sidecar changed, and trash or restore copies (F8).
-5. **Record** the new last-synced state, including the sidecar's new mtime, so the daemon doesn't reprocess its own
-   writes.
+5. **Record** the new last-synced state, including the sidecar's new size and mtime, so the daemon doesn't reprocess
+   its own writes, and the full pass can skip the sidecar until it changes again (section 13).
 6. **File** the unit if it's ready (section 7).
 
 If the state is lost, merge as a union, which never drops a tag, and report it.
@@ -347,6 +368,35 @@ curl -fsSL https://raw.githubusercontent.com/kael-shipman/media-triage/main/inst
 - **It warns if exiftool is missing.**
 - **Re-running it is safe:** it reinstalls or upgrades the executable and leaves the configuration alone.
 
+## 13. Scale
+
+An archive can hold tens of thousands of photos and videos, each with a sidecar, and each shared one is an asset in
+several accounts. On a typical day almost none of it changes. So, apart from the first run, the daemon's work grows
+with what changed, not with the size of the archive.
+
+- **Files:** inotify reports changes as they happen. The full pass only stats files, and compares each sidecar's size
+  and mtime with the state's record. It reads a sidecar, the slow part, only when it changed.
+- **exiftool** runs as one long-lived process (`-stay_open`, managed by `exiftool-vendored`), never a process per
+  file.
+- **Immich's changes** come from the sync stream, which sends only what changed since the last acknowledgement. The
+  stream is read line by line as it arrives, never held in memory whole, and acted on in batches.
+- **Asset paths** (section 3) are looked up in bulk when there are many: on a first run, after a reset, or when one
+  batch from the stream holds many new assets (a new library's first scan). Then each of their libraries is listed with
+  a search (`POST /api/search/metadata`, filtered by library), a page of 1,000 at a time. A few new assets are looked
+  up one by one (`GET /api/assets/{id}`).
+- **Writes to Immich are batched:** metadata refreshes (`POST /api/assets/jobs`), trashing (`DELETE /api/assets`),
+  restoring (`POST /api/trash/restore/assets`), and favorites and visibility (`PUT /api/assets`) each take a list of
+  assets. A change to a thousand photos is a few requests, not a thousand.
+- **The state database** is indexed by path and by asset ID, and each batch's writes are one transaction.
+- **inotify needs a watch per folder.** At start, the daemon compares the number of folders with
+  `fs.inotify.max_user_watches`, and says how to raise it if it's too low. Other programs, such as Syncthing, use
+  watches from the same allowance.
+- **The first run is the heaviest:** it reads every sidecar once, and streams every asset once per account. Run it with
+  `--dry-run` first, which shows what it would do, with counts.
+
 ## History
 
 - 2026-11-03: written, from the plan made for the author's own setup.
+- 2026-11-04: sync covers the whole archive, not just the inbox (section 1), and section 13 (scale) added. Section 3
+  corrected from Immich 3.3.5's source: `AssetsV2` and `AlbumsV2` instead of the V1 types, the stream carries no
+  paths, `AssetFacesV3` covers the cluster group, and resets.
