@@ -1,0 +1,54 @@
+# A development Immich for media-triage's integration tests. Start and stop it with test/immich/dev.ts, which also
+# creates its users: `bun test/immich/dev.ts up`.
+#
+# Based on upstream's docker/docker-compose.yml and docker-compose.rootless.yml for v3.3.5, changed so it can run
+# beside another Immich and leaves nothing behind:
+# - no container names, and only the server's port, on 127.0.0.1;
+# - no machine learning (dev.ts also turns it off in Immich's settings);
+# - the server runs as the developer's user, so the files it writes in the media folder are theirs;
+# - the database lives in memory, and the uploads and media folders under test/immich/.data.
+
+name: media-triage-immich
+
+x-env: &env
+  TZ: UTC
+  DB_PASSWORD: postgres
+  DB_USERNAME: postgres
+  DB_DATABASE_NAME: immich
+
+services:
+  immich-server:
+    image: ghcr.io/immich-app/immich-server:${IMMICH_VERSION:-v3.3.5}
+    user: "${MEDIA_TRIAGE_UID:-1000}:${MEDIA_TRIAGE_GID:-1000}"
+    security_opt:
+      - no-new-privileges:true
+    environment: *env
+    volumes:
+      - ${MEDIA_TRIAGE_DATA:-./.data}/upload:/data
+      # Libraries are made over this folder, as Immich sees it on a real server.
+      - ${MEDIA_TRIAGE_DATA:-./.data}/media:/mnt/media
+    ports:
+      - "127.0.0.1:${MEDIA_TRIAGE_IMMICH_PORT:-2284}:2283"
+    depends_on:
+      - redis
+      - database
+    healthcheck:
+      disable: false
+
+  redis:
+    image: docker.io/valkey/valkey:9@sha256:c123e3715db63d06d4ad6964884037aa0d5d4d703939b9929954112889708e1d
+    healthcheck:
+      test: redis-cli ping | grep -q PONG || exit 1
+
+  database:
+    image: ghcr.io/immich-app/postgres:14-vectorchord0.4.3-pgvectors0.2.0@sha256:bcf63357191b76a916ae5eb93464d65c07511da41e3bf7a8416db519b40b1c23
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_DB: immich
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    tmpfs:
+      - /var/lib/postgresql/data
+    shm_size: 128mb
+    healthcheck:
+      disable: false

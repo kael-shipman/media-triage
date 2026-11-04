@@ -86,6 +86,15 @@ bun run build        # executables for linux-x64 and linux-arm64, in dist/
 bun src/main.ts help # run it from source
 ```
 
+The Immich client's integration tests need a development Immich (3.3.5, in Docker, on `127.0.0.1:2284`). They're
+skipped unless `MEDIA_TRIAGE_IMMICH_TESTS=1`:
+
+```sh
+bun run immich up                        # start it, with two made-up users
+MEDIA_TRIAGE_IMMICH_TESTS=1 bun test     # every test, the integration tests included
+bun run immich down                      # stop it, and delete its data
+```
+
 ## License
 
 MIT. See [LICENSE](LICENSE).

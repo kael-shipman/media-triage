@@ -306,6 +306,9 @@ or a library.
   - `src/main.ts`: the command line;
   - `src/core/`: the pure rules, without I/O;
   - each module's tests sit beside it (`*.test.ts`).
+  - `test/immich/`: a development Immich for the integration tests (`compose.yml`, started and stopped by `dev.ts`),
+    and what the tests share (`harness.ts`). Tests that need it are skipped unless `MEDIA_TRIAGE_IMMICH_TESTS=1`;
+  - `test/fixtures/`: small media files with made-up metadata.
 - **Run it on the host, not in a container,** or at least with the inbox and archive in one mount. Filing moves files
   with `link()`, which fails across mounts (`EXDEV`), even between two bind mounts of the same drive.
 - **Releases:** pushing a tag `vX.Y.Z` runs `.github/workflows/release.yml`. It tests, builds both executables, writes

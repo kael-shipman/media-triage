@@ -36,8 +36,16 @@ session stops partway.
   - `folder-dates.ts` and `exclusions.ts`: which names a date-limited library allows, and the exclusion patterns
     for it, checked against picomatch and fast-glob by fuzzing and a real crawl (about 44 patterns per level);
   - `orphans.ts`: which media file a sidecar belongs to, Darktable duplicates included (F11).
+- **A development Immich** (milestone 3, step 1): `test/immich/compose.yml`, upstream's v3.3.5 stack without machine
+  learning, on `127.0.0.1:2284`, the server running as the developer's user, the database in memory. `bun run immich
+  up` starts it and creates two made-up users (the admin `alex@example.com`, and `sam@example.com`), and turns off
+  machine learning and the version check; `down` deletes everything. `harness.ts` holds what tests share
+  (`describeImmich`, `mediaFolder`, `api`, `waitFor`). A smoke test checks that a library over the media folder indexes
+  `test/fixtures/photo.jpg` at Immich's path, with its EXIF date. Starting takes about a minute (the images are
+  cached after the first pull).
 - **`run` starts and stops cleanly. Its only job so far is the upgrade check.**
-- **Tests:** 214, all passing (`npx bun@1.4.4 test`), and the type check is clean.
+- **Tests:** 214, all passing (`npx bun@1.4.4 test`), plus 2 against the development Immich
+  (`MEDIA_TRIAGE_IMMICH_TESTS=1`). The type check is clean, and covers `test/` too.
 - **Design updated 2026-11-04** (approved by the author): sync covers the whole archive, not just the inbox, and a
   new section 13 (scale) says how that stays cheap. Section 3 corrected from 3.3.5's source: `AssetsV2` and
   `AlbumsV2` (3.3.5 refuses `AssetsV1`), no paths in the stream (looked up once per asset, in bulk where there are
@@ -45,11 +53,9 @@ session stops partway.
 
 ## Next
 
-**Exactly what to do next:** milestone 3: the Immich client.
-1. **A development Immich** for integration tests: a Docker Compose file under `test/immich/` (upstream's
-   `docker-compose.yml` for v3.3.x, Postgres and Redis included, machine learning off), plus a script that starts
-   it, creates an admin and a second user through the API, and stops it. Tests that need it are skipped unless
-   `MEDIA_TRIAGE_IMMICH_TESTS=1`.
+**Exactly what to do next:** milestone 3, the Immich client, from step 2. Step 1 (the development Immich) is done:
+`bun run immich up`, then `MEDIA_TRIAGE_IMMICH_TESTS=1 bun test`.
+1. [x] **A development Immich** for integration tests (`test/immich/`).
 2. **`src/immich/`:** add `@immich/sdk` (pin the version to the server's, 3.3.x). Wrap what the daemon needs:
    - login (`POST /auth/login`) and the session file, plus a `media-triage login <account>` command that asks for
      the password without echoing it, stores the token mode 600 in `<state>/sessions/<account>`, and checks it with
