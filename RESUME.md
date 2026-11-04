@@ -133,10 +133,13 @@ What milestone 5 gives it (`src/sidecars/`, `src/core/xmp.ts`):
      `DirtyUnits` (units taken once quiet for a moment, so a sidecar written in steps is acted on once).
    - `full-pass.ts`: `fullPass(store, folders)`: stats only; returns units with no record or whose sidecar's stamp
      changed.
-4. **The sync stream consumer**, per account: `syncStream` gives batches; act on a batch, then `acknowledge` its
-   acks. A batch with `reset` is acknowledged and followed by a full read. `AssetFacesV3` reports other accounts'
-   faces too (cluster group). Immich's own jobs touch a person again shortly after a face is added; the
-   last-synced comparison makes that a no-op.
+4. [x] **The sync stream consumer** (done 2026-11-04), `src/sync/stream.ts`: `consumeStream(account, store, map,
+   { act })` reads one account's stream to its end; per batch it records assets (`AssetV2`: trash and visibility;
+   `AssetDeleteV1`: removed), learns new assets' paths (`learnAssets`: whole libraries past 50 unknown, else
+   `getAsset` each), hands the batch's units (local media paths; asset, exif and album-membership events) to `act`,
+   and only then acknowledges. On `SyncResetV1` it acknowledges, forgets the account's assets and returns
+   `reset: true`: the caller reads again (`learnAllAssets` can fill the store first). People, faces and albums' own
+   events are acknowledged and otherwise left for milestone 7. Not yet run by the daemon (step 5).
 5. **The reconcile loop** (section 5) and F1–F8, with the merge from `src/core/tags.ts`. Each copy's tags come from
    `getAsset` (`tags`). Writes to Immich in bulk (`refreshMetadata`, `trashAssets`, `restoreAssets`).
 6. **F1's setting** (whether the server reads new sidecars on refresh), and F8's offline check.
