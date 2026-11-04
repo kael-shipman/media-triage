@@ -343,8 +343,16 @@ or a library.
   - All people are shared between the accounts, both ways, with the write role, on every pass. Immich allows sharing
     only within a cluster group, so this comes after joining. "Share all" covers
     only the people that exist when it runs.
-  - A name is copied onto the other accounts' unnamed records for the same person group, unless Immich already shows
-    the sharer's name.
+  - A name is copied onto the other accounts' unnamed records for the same person group. Immich 3.3 shows each account
+    only its own record's name (the web lists the others' only as alternatives on the person's page, and the phone app
+    not at all), so an unnamed record shows as unnamed there.
+  - **Immich keeps names in step itself once people are shared** (checked against 3.3.5): renaming a person renames
+    the records of the accounts that shared it with you with write access (`person.service.ts`, `update`), and a
+    record made for a shared person starts with the sharer's name. So copying matters for records that existed,
+    unnamed, before the name was set or shared: mostly the first pass after the accounts start sharing.
+  - **Finding the unnamed records:** Immich's people list leaves out unnamed people with fewer faces than the
+    recognition's minimum (3 by default), so each account's record of every person named elsewhere is read directly.
+    A person named differently in different accounts is reported, and neither name is copied.
 
 ## 9. Safety
 

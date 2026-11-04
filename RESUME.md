@@ -99,6 +99,10 @@ session stops partway.
   hidden-file patterns against local paths inside a hidden folder (like Emmer's `~/.data/archive`) excluded
   everything, so exclusions are matched against Immich's paths. `fast-glob` and `picomatch` are runtime dependencies
   now (pinned, as Immich uses them); `src/core/media.ts` lists Immich's extensions.
+- **Milestone 4, step E:** `src/upkeep/people.ts` (`upkeepPeople`: share all both ways with write access every pass,
+  then copy names onto records still unnamed; conflicts reported) and `getPerson`. Found in 3.3.5: renames already
+  reach the records shared with write access, new records for a shared person start with its name, and the people
+  list hides unnamed people with fewer than 3 faces (so those records are read one by one).
 - **Cleanup:** milestone 2's tests held a real date, a real person's name and real folder names; replaced with
   made-up ones (`7b4143a`). They remain in the repository's history.
 - **Tests:** 260 without Immich, all passing (`npx bun@1.4.4 test`), and 266 with the development Immich (as of
@@ -131,7 +135,7 @@ up`, then `MEDIA_TRIAGE_IMMICH_TESTS=1 bun test`). Milestone 4 doesn't depend on
    (`src/core/folder-dates.ts`), and crawl the local folders at its levels (through the path map) for files the rule
    allows that aren't in the library. Fail loudly on either; also report undated names and inbox files dated before
    `since`. It runs after every scan and on demand.
-5. **People:** share all people both ways with the write role (`shareAllPeople`), then copy names onto the other
+5. [x] **People:** share all people both ways with the write role (`shareAllPeople`), then copy names onto the other
    accounts' unnamed records for the same person ID (`listPeople`, `renamePeople`).
 6. **In the daemon:** run 1–5 at start and on every full pass, as one scheduler job.
 

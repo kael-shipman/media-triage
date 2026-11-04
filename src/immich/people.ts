@@ -10,13 +10,14 @@ import {
   type PersonUsersResponseDto,
   createPerson as sdkCreatePerson,
   getAllPeople,
+  getPerson as sdkGetPerson,
   getUsersForPeople,
   updatePeople,
   upsertPeopleUsers,
 } from "@immich/sdk";
 import { chunks } from "./assets.ts";
 import { type BulkFailure, failures } from "./bulk.ts";
-import type { ImmichClient } from "./client.ts";
+import { type ImmichClient, ImmichError } from "./client.ts";
 
 export type Person = PersonResponseDto;
 
@@ -24,9 +25,10 @@ export type Person = PersonResponseDto;
 const PEOPLE_PAGE = 1000;
 
 /**
- * Every person the account has, hidden ones included (`GET /api/people`, page by page). Only people with a visible
- * face on the account's own assets (or a partner's, or in a shared album) are listed (`person.repository.ts`,
- * `getAllForUser`); the sync stream's `PersonV1` reports the others too.
+ * The account's people, hidden ones included (`GET /api/people`, page by page). Not all of them: only people with a
+ * visible face on the account's own assets (or a partner's, or in a shared album), and of the unnamed ones only those
+ * with at least the recognition's minimum of faces (`minFaces`, 3 by default) (`person.repository.ts`,
+ * `getAllForUser`). Named people with a face are always listed. The sync stream's `PersonV1` reports every record.
  */
 export async function listPeople(client: ImmichClient): Promise<Person[]> {
   const people: Person[] = [];
@@ -34,6 +36,17 @@ export async function listPeople(client: ImmichClient): Promise<Person[]> {
     const result = await client.call("Listing people", (opts) => getAllPeople({ withHidden: true, page, size: PEOPLE_PAGE }, opts));
     people.push(...result.people);
     if (!result.hasNextPage) return people;
+  }
+}
+
+/** The account's own record of a person (`GET /api/people/{id}`), or undefined if it has none. */
+export async function getPerson(client: ImmichClient, id: string): Promise<Person | undefined> {
+  try {
+    return await client.call(`Reading person ${id}`, (opts) => sdkGetPerson({ id }, opts));
+  } catch (error) {
+    // Immich answers 400 "Not found or no person.read access" for a person the account has no record of.
+    if (error instanceof ImmichError && (error.status === 400 || error.status === 404) && /not found/i.test(error.message)) return undefined;
+    throw error;
   }
 }
 
