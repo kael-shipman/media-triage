@@ -86,7 +86,7 @@ export async function checkLibrary(
 
   // Every allowed file must be an asset. Found as Immich's crawler finds them, inside each folder, and filtered by the
   // library's exclusions other than the date limit's, matched against Immich's paths. Matching local paths instead
-  // would go wrong when the local folders are inside a hidden one (`~/.data/…`): `**/.*/**` would exclude everything.
+  // would go wrong when the local folders are inside a hidden one (`~/.media/…`): `**/.*/**` would exclude everything.
   const folders = configured.folders.map((folder) => ({ immich: folder, local: map.toLocal(folder) }));
   const unmapped = folders.find((folder) => folder.local === undefined);
   if (unmapped) {

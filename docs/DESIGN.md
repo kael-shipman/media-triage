@@ -331,7 +331,7 @@ every step that only reads, and reports what the others would change.
     thumbnail still shows. Locked assets can't be listed without the account's PIN, so they aren't checked.
   - **Files are found as Immich's crawler finds them** (fast-glob, its extensions and options, inside each folder),
     and the library's other exclusions are matched against Immich's paths, with the options Immich's watcher uses.
-    Matching local paths instead would go wrong when the local folders are inside a hidden one (`~/.data/…`).
+    Matching local paths instead would go wrong when the local folders are inside a hidden one (`~/.media/…`).
   - **Files changed since the library's last scan** (by ctime, which a move updates) are left for the next check.
   - **Nothing is assumed:** a library that doesn't exist yet, hasn't been scanned, belongs to an account that isn't
     logged in, or whose folders hold no media files here while Immich has some (a wrong path map) is a failure.

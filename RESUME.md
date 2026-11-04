@@ -96,7 +96,7 @@ session stops partway.
 - **Milestone 4, step D:** `src/upkeep/check.ts` and `media-triage check`. Tested against the development Immich: a
   correct library passes; leaked assets fail, and still fail once offline in the trash; patterns that leave out an
   allowed folder show its files as missing; a wrong path map is a failure, not a pass. Found on the way: matching the
-  hidden-file patterns against local paths inside a hidden folder (like Emmer's `~/.data/archive`) excluded
+  hidden-file patterns against local paths inside a hidden folder (such as `~/.media/archive`) excluded
   everything, so exclusions are matched against Immich's paths. `fast-glob` and `picomatch` are runtime dependencies
   now (pinned, as Immich uses them); `src/core/media.ts` lists Immich's extensions.
 - **Milestone 4, step E:** `src/upkeep/people.ts` (`upkeepPeople`: share all both ways with write access every pass,
