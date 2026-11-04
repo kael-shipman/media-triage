@@ -23,7 +23,7 @@ test("jsonLines splits lines across chunks, multi-byte characters included", asy
 });
 
 test("jsonLines throws on a line that isn't JSON", async () => {
-  expect(collect(jsonLines(chunks("nope\n")))).rejects.toThrow(SyntaxError);
+  await expect(collect(jsonLines(chunks("nope\n")))).rejects.toThrow(SyntaxError);
 });
 
 test("lastAckPerType keeps the last ack of each type", () => {
@@ -82,7 +82,7 @@ test("a stream cut off before SyncCompleteV1 still hands on what arrived", async
 });
 
 test("a line without a type or ack is an error", async () => {
-  expect(collect(batchEvents(lines({ data: {} }), 10))).rejects.toThrow("a line without a type or an ack");
+  await expect(collect(batchEvents(lines({ data: {} }), 10))).rejects.toThrow("a line without a type or an ack");
 });
 
 describeImmich("the sync stream, against Immich", () => {

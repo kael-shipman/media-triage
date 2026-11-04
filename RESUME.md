@@ -74,7 +74,14 @@ session stops partway.
   - sharing people needs both accounts in one cluster group (tested as a refusal for now; the working case comes with
     the cluster-group calls);
   - the SDK reads errors from calls without a response body as text; `toImmichError` now parses them.
-- **Tests:** 238 without Immich, all passing (`npx bun@1.4.4 test`), and 261 with the development Immich
+- **Libraries, users and cluster groups** (milestone 3, step 2): `libraries.ts` (list, create, update, scan,
+  statistics, validate folders, list users; lists Immich would refuse are refused first, naming the library) and
+  `cluster-groups.ts` (the account's group, members, invite, invitations, accept; "reset facial recognition" is
+  deliberately not wrapped). Checked against the development Immich: two accounts' libraries over the same folder each
+  get their own assets; an account that joins a group keeps its named people; sharing people works once both are in
+  one group.
+- **Milestone 3 is done** (2026-11-04).
+- **Tests:** 239 without Immich, all passing (`npx bun@1.4.4 test`), and 266 with the development Immich
   (`MEDIA_TRIAGE_IMMICH_TESTS=1`). The type check is clean, and covers `test/` too.
 - **Design updated 2026-11-04** (approved by the author): sync covers the whole archive, not just the inbox, and a
   new section 13 (scale) says how that stays cheap. Section 3 corrected from 3.3.5's source: `AssetsV2` and
@@ -83,23 +90,31 @@ session stops partway.
 
 ## Next
 
-**Exactly what to do next:** milestone 3, the Immich client, from step 2. Steps 1 and 2's login and sync stream are done:
-`bun run immich up`, then `MEDIA_TRIAGE_IMMICH_TESTS=1 bun test`. The asset, album, face and people calls and the path map are
-done. Next are the library, user and cluster-group calls, which finish milestone 3.
-1. [x] **A development Immich** for integration tests (`test/immich/`).
-2. **`src/immich/`:** wrap what the daemon needs:
-   - [x] login and sessions, and `media-triage login <account>`;
-   - [x] the sync stream (`POST /sync/stream`, JSON lines) and acknowledgements (`POST /sync/ack`);
-   - [x] assets by original path, metadata refresh (the asset jobs endpoint), trash and restore, favorite and
-     visibility;
-   - [x] albums, faces (`GET`/`POST`/`PUT`/`DELETE /faces`), people and people sharing;
-   - **next:** libraries (create, update exclusion patterns, scan), users (to find account IDs), and cluster groups
-     (invite, accept), with a test that shares people between two accounts in one group.
-3. [x] **The path map:** translate between Immich's paths and local ones, both ways (`immich.path_map`).
+**Exactly what to do next:** milestone 4, account upkeep (DESIGN.md, section 8). Milestone 3, the Immich client, is
+done: `src/immich/` wraps every call the daemon needs, each tested against the development Immich (`bun run immich
+up`, then `MEDIA_TRIAGE_IMMICH_TESTS=1 bun test`). Milestone 4 doesn't depend on the open questions below.
 
-Check each call's request and response shapes in the SDK; the server's `/api/spec` is the reference.
-Mind DESIGN.md section 13: list in bulk (search pages of 1,000), write in bulk (every call that takes a list of IDs),
-and read the sync stream line by line.
+1. **Accounts:** for each configured account, load its session (`loadSession`; no session means skip the account
+   with a message saying to run `media-triage login <account>`), and read its user ID and cluster group (`me()`).
+   Library work needs the admin account's session.
+2. **Cluster group:** every account joins the first account's group (`inviteToClusterGroup` from the first account,
+   `acceptClusterGroupInvitation` with the joining account's session), **before** any library of the joining account is
+   created.
+3. **Libraries:** for each `[[immich.libraries]]`, the wanted state: owner (the account's user ID), name, folders,
+   and exclusion patterns (the hidden-file patterns, the configured `exclude`, and `datedExclusions` from
+   `src/core/exclusions.ts`; at most 128). Match existing libraries by owner and name (`listLibraries`). Create the
+   missing ones, correct folders and exclusion patterns that differ, and scan only what changed. Report libraries in
+   Immich that aren't configured; never delete one. Everything is idempotent, and `--dry-run` only reports.
+4. **`media-triage check`:** for each date-limited library, classify every asset's path with `allowedSince`
+   (`src/core/folder-dates.ts`), and crawl the local folders at its levels (through the path map) for files the rule
+   allows that aren't in the library. Fail loudly on either; also report undated names and inbox files dated before
+   `since`. It runs after every scan and on demand.
+5. **People:** share all people both ways with the write role (`shareAllPeople`), then copy names onto the other
+   accounts' unnamed records for the same person ID (`listPeople`, `renamePeople`).
+6. **In the daemon:** run 1–5 at start and on every full pass, as one scheduler job.
+
+Test each against the development Immich with fresh users (`newUser` in `test/immich/harness.ts`), since joining a
+cluster group changes an account for good.
 
 **Open question for the author, F1 (needed by milestone 6):** a metadata refresh re-reads only a sidecar Immich
 already knows. Immich looks for sidecars when it first indexes a file, and `refresh-metadata` doesn't look again
@@ -122,7 +137,7 @@ is written, a change to one account's exclusion patterns would trash the other a
 their trash 30 days later deletes the original files. Proposal: F8 mirrors a trash or restore only after checking
 through the API that the copy isn't offline, and never mirrors going offline or coming back online.
 
-**Open question for the author** (doesn't block milestone 3; needed by milestone 6, the watcher): which folders count as
+**Open question for the author** (needed by milestone 6, the watcher): which folders count as
 "the archive" for watching and the full pass. `paths.archive` can be the root of a larger tree (Setup files, backups),
 and watching all of it is wasted work. Proposal: the folders of every configured library, mapped to local paths, plus
 the inbox sources.
@@ -147,8 +162,10 @@ Each step ends with tests passing, a commit, and this file updated.
 4. [x] Folder dates and exclusion patterns, tested against picomatch and fast-glob (section 8).
 5. [x] Orphan sidecars: which media file a sidecar belongs to (F11).
 
-**3. Immich client:** login and sessions, the sync stream, and the asset, face, album, library, people and
-cluster-group calls. Integration tests against a development Immich in Docker Compose.
+**3. Immich client** (`src/immich/`), done 2026-11-04
+1. [x] A development Immich for the integration tests (`test/immich/`).
+2. [x] Login and sessions, the sync stream, and the asset, album, face, people, library and cluster-group calls.
+3. [x] The path map (`src/core/path-map.ts`).
 
 **4. Account upkeep** (section 8): libraries, exclusion patterns, `check`, cluster group, people. Needed first by the
 author's setup.

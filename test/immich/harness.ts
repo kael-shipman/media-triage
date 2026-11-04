@@ -131,3 +131,14 @@ export async function indexedLibrary(
   });
   return { libraryId, folder, assets: Object.fromEntries(assets.map((asset) => [asset.originalFileName, { id: asset.id, originalPath: asset.originalPath }])) };
 }
+
+/**
+ * A new user, made by the admin with a unique made-up email, for tests that change an account for good (such as
+ * joining a cluster group), so that no other test depends on the order they run in.
+ */
+export async function newUser(adminToken: string, label: string): Promise<TestUser> {
+  const unique = `${label}-${crypto.randomUUID().slice(0, 8)}`;
+  const user: TestUser = { name: `${label} Example`, email: `${unique}@example.com`, password: `${unique}-password`, admin: false };
+  await api("POST", "/admin/users", { token: adminToken, body: { email: user.email, password: user.password, name: user.name } });
+  return user;
+}

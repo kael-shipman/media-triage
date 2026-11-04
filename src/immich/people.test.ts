@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test";
 import { IMMICH_URL, USERS, describeImmich, indexedLibrary } from "../../test/immich/harness.ts";
-import { ImmichError, login } from "./client.ts";
+import { login } from "./client.ts";
 import { createFace } from "./faces.ts";
-import { createPerson, listPeople, renamePeople, shareAllPeople } from "./people.ts";
+import { createPerson, listPeople, renamePeople } from "./people.ts";
 
 describeImmich("people, against Immich", () => {
   test("people with faces are listed, and renamed in bulk; people without faces aren't listed", async () => {
@@ -22,13 +22,5 @@ describeImmich("people, against Immich", () => {
     expect(names.get(jordan.id)).toBe("Jordan B. Example");
     expect(names.get(quinn.id)).toBe("Quinn B. Example");
     expect(names.has(faceless.id)).toBe(false);
-  });
-
-  test("sharing people needs the accounts in one cluster group", async () => {
-    const sam = await login(IMMICH_URL, USERS.sam.email, USERS.sam.password);
-    const alex = await login(IMMICH_URL, USERS.alex.email, USERS.alex.password);
-    const error = await shareAllPeople(sam.client, [alex.userId]).catch((caught: unknown) => caught);
-    expect(error).toBeInstanceOf(ImmichError);
-    expect((error as ImmichError).message).toContain("All users must be in the same cluster group");
   });
 });

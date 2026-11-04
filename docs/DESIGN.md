@@ -269,7 +269,11 @@ or a library.
 
 - **Libraries:** each account's libraries, with their folders and exclusion patterns.
   - The daemon creates missing libraries, corrects exclusion patterns, and starts a scan when it changed something.
-  - Creating a library for another account needs the admin's session.
+  - Creating a library for another account needs the admin's session, and every library call does too. A library's
+    owner is set when it's created and never changes.
+  - Two accounts' libraries can index the same folder, and each gets its own assets (checked against 3.3.5).
+  - Immich allows at most 128 import paths and 128 exclusion patterns per library, each unique and non-empty. The
+    daemon checks before sending, so the error names the library.
   - It never deletes a library. A library that's in Immich but not in the configuration is reported.
 - **Libraries limited by date** (`since = "YYYY-MM-DD"`): the library sees only names that start with a date on or
   after `since`, at the configured levels (for example, the first folder level under `Pictures` and the second under
@@ -301,9 +305,11 @@ or a library.
   - This happens **before that account's libraries are created**, so its faces cluster into the people that already
     exist.
   - Joining keeps people and names (`cluster-group.service.ts`, `acceptRequest`). The group's "Reset facial
-    recognition" is what deletes every person and name; the daemon never calls it.
+    recognition" is what deletes every person and name; the daemon never calls it. Checked against 3.3.5: the
+    joining account keeps its named people.
 - **People:**
-  - All people are shared between the accounts, both ways, with the write role, on every pass. "Share all" covers
+  - All people are shared between the accounts, both ways, with the write role, on every pass. Immich allows sharing
+    only within a cluster group, so this comes after joining. "Share all" covers
     only the people that exist when it runs.
   - A name is copied onto the other accounts' unnamed records for the same person group, unless Immich already shows
     the sharer's name.
@@ -334,7 +340,8 @@ or a library.
   - `src/core/`: the pure rules, without I/O;
   - `src/immich/`: the Immich client: one `ImmichClient` per account's session, wrapping `@immich/sdk` (pinned to the
     server's version), plus the sessions and `login`, assets (`assets.ts`: listing, finding by path, and bulk
-    changes), albums, faces and people (`albums.ts`, `faces.ts`, `people.ts`), and the sync stream (`sync.ts`, read with `fetch`, since the
+    changes), albums, faces and people (`albums.ts`, `faces.ts`, `people.ts`), libraries and users (`libraries.ts`), cluster
+    groups (`cluster-groups.ts`), and the sync stream (`sync.ts`, read with `fetch`, since the
     SDK's `getSyncStream` reads the whole response as text);
   - each module's tests sit beside it (`*.test.ts`).
   - `test/immich/`: a development Immich for the integration tests (`compose.yml`, started and stopped by `dev.ts`),
