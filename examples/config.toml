@@ -1,0 +1,89 @@
+# media-triage configuration
+#
+# Every setting, with its default where it has one. The design behind them is docs/DESIGN.md:
+# https://github.com/kael-shipman/media-triage/blob/main/docs/DESIGN.md
+#
+# Durations are written like "90s", "5m", "6h", "1d" or "1h30m". A leading "~" in a path is your home folder.
+
+[paths]
+# The inbox: each subfolder listed under [[sources]] is a source of new photos and videos (a phone's camera folder).
+inbox = "/srv/media/Inbox"
+# The archive: filing moves photos and videos into it, and sync keeps every sidecar in it in step.
+archive = "/srv/media"
+# The state folder: the database, the Immich sessions and the logs. Never inside a synced folder.
+# state = "~/.local/state/media-triage"
+
+# One block per inbox subfolder. Files there get this creator (dc:creator) when they have none.
+[[sources]]
+folder = "Alex Phone"
+creator = "Alex Example"
+
+[[sources]]
+folder = "Sam Phone"
+creator = "Sam Example"
+
+[filing]
+# Where filed photos and videos go, inside the archive. The names within follow the author's Darktable preset:
+# <photos>/YYYY.MM.DD - <Title>/YYYY.MM.DD-HH.MM.SS - <Creator>.<ext>
+photos = "Pictures"
+videos = "Videos/Clips"
+
+[immich]
+url = "http://127.0.0.1:2283"
+# Immich sees the files at its own paths, inside its container. Map each to where this machine sees them.
+path_map = [
+  { immich = "/mnt/media/", local = "/srv/media/" },
+]
+# Whether the server mirrors manual face corrections between copies of the same file (the kael-shipman/immich fork
+# does, with IMMICH_SHARE_DERIVED_DATA=true). If it does, filing corrects faces on one copy only.
+mirrors_face_corrections = false
+
+# One block per Immich account. Log each in once with `media-triage login <name>`.
+[[immich.accounts]]
+name = "alex"                 # a label, used in logs and for the session file
+email = "alex@example.com"    # the account's login
+admin = true                  # the admin account creates every account's libraries
+
+[[immich.accounts]]
+name = "sam"
+email = "sam@example.com"
+
+# Libraries the daemon keeps set up, per account. Folders are Immich's paths. Hidden files are always excluded.
+[[immich.libraries]]
+account = "alex"
+name = "Archive"
+folders = ["/mnt/media/Pictures", "/mnt/media/Videos"]
+
+[[immich.libraries]]
+account = "alex"
+name = "Inbox"
+folders = ["/mnt/media/Inbox/Alex Phone", "/mnt/media/Inbox/Sam Phone"]
+
+[[immich.libraries]]
+account = "sam"
+name = "Shared archive"
+folders = ["/mnt/media/Pictures", "/mnt/media/Videos"]
+exclude = ["/mnt/media/Pictures/Staging{,/**}"]   # extra exclusion patterns
+# Only names starting with a date on or after `since`, directly inside each of `levels`, are in this library.
+dated = { since = "2020-06-15", levels = ["/mnt/media/Pictures", "/mnt/media/Videos/*"] }
+
+[[immich.libraries]]
+account = "sam"
+name = "Inbox"
+folders = ["/mnt/media/Inbox/Alex Phone", "/mnt/media/Inbox/Sam Phone"]
+
+[timing]
+settle = "5m"          # filing waits until nothing about a photo has changed for this long
+orphan_grace = "1h"    # a sidecar is deleted this long after its photo went
+full_pass = "24h"      # how often everything is checked, beyond the changes it's told about
+
+[upgrade]
+enabled = true                                         # check for and install new releases by itself
+repo = "https://github.com/kael-shipman/media-triage"  # where releases come from (GitHub or GitHub Enterprise)
+interval = "6h"                                        # how often to check
+track = "minor"                                        # how far an automatic upgrade may go: "patch", "minor" or "major"
+prerelease = false                                     # also take pre-releases
+restart = true                                         # exit after upgrading, so the service manager starts the new version
+
+[log]
+level = "info"   # "debug", "info", "warn" or "error"

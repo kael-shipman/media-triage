@@ -1,0 +1,21 @@
+{
+  "name": "media-triage",
+  "version": "0.1.0",
+  "description": "Keeps a photo inbox, an archive, Immich and Darktable in step, and files triaged photos",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "repository": "github:kael-shipman/media-triage",
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "build": "bun scripts/build.ts",
+    "start": "bun src/main.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.4",
+    "@types/picomatch": "^4.0.3",
+    "picomatch": "^4.0.7",
+    "typescript": "^7.0.2"
+  }
+}
