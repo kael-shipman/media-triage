@@ -20,10 +20,10 @@ export const LAST_YEAR = 2099;
  * Whether a name, directly inside one of a library's dated levels, belongs in a library limited to names dated on or
  * after `since`. A name is allowed when it starts with:
  * - a year after since's (up to 2099), whatever follows; or
- * - since's year, then a later month (up to 12), separated ("2019.08", "2019-08") or not ("201908"); or
- * - since's year and month, then a day from since's to 31 ("2019.07.27", "2019-07-27", "20190727").
+ * - since's year, then a later month (up to 12), separated ("2020.07", "2020-07") or not ("202007"); or
+ * - since's year and month, then a day from since's to 31 ("2020.06.15", "2020-06-15", "20200615").
  * What follows the date doesn't matter. Everything else is excluded: earlier dates, undated names, and names only as
- * precise as a year or month that holds `since` ("2019 Christmas", "2019.07").
+ * precise as a year or month that holds `since` ("2020 Christmas", "2020.06").
  *
  * src/core/exclusions.ts generates the exclusion patterns from this rule, and its tests check that they agree.
  */

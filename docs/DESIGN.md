@@ -277,8 +277,8 @@ or a library.
   - It never deletes a library. A library that's in Immich but not in the configuration is reported.
 - **Libraries limited by date** (`since = "YYYY-MM-DD"`): the library sees only names that start with a date on or
   after `since`, at the configured levels (for example, the first folder level under `Pictures` and the second under
-  `Videos`). Everything else is excluded: earlier dates, undated names, and names whose date is too vague (`2019` or
-  `2019.07`, when `since` falls inside that year or month).
+  `Videos`). Everything else is excluded: earlier dates, undated names, and names whose date is too vague (`2020` or
+  `2020.06`, when `since` falls inside that year or month).
   - **The rule** (`src/core/folder-dates.ts`): a name is allowed when it starts with a year after `since`'s, or with
     `since`'s year and a later month, or with `since`'s month and a day on or after `since`'s. Dates are written
     `YYYY.MM.DD`, `YYYY-MM-DD` or `YYYYMMDD`. What follows the date doesn't matter.

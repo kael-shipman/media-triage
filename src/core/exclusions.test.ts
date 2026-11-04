@@ -25,7 +25,7 @@ function namesAround(sinceText: string, count: number, seed: number): string[] {
   const next = random(seed);
   const pick = <T>(items: readonly T[]) => items[Math.floor(next() * items.length)]!;
   const two = (value: number) => String(value).padStart(2, "0");
-  const names = new Set<string>(["Staging", "Best-Of Photos", "Misc", "4th of July", "1", "12", "123", "1234", "2100", "0000"]);
+  const names = new Set<string>(["Staging", "Highlights", "Misc", "Summer Fair", "1", "12", "123", "1234", "2100", "0000"]);
   for (let i = 0; i < count; i++) {
     const year = pick([since.year - 1, since.year, since.year, since.year, since.year + 1, 1999, 2099, 2100, 1000 + Math.floor(next() * 9000)]);
     const month = pick([since.month - 1, since.month, since.month, since.month + 1, 0, 12, 13, 99, Math.floor(next() * 100)]);
@@ -74,7 +74,7 @@ describe("numberRange", () => {
   });
 });
 
-describe.each(["2019-07-27", "2020-01-01", "2021-12-31", "2019-10-09", "2000-02-01", "2015-11-30"])("since %s", (since) => {
+describe.each(["2020-06-15", "2020-01-01", "2021-12-31", "2019-10-09", "2000-02-01", "2015-11-30"])("since %s", (since) => {
   const levels = ["/m/Pictures", "/m/Videos/*"];
   const patterns = datedExclusions({ since, levels });
   const names = namesAround(since, 3000, since.length * 31 + Number(since.slice(-2)));
@@ -106,7 +106,7 @@ describe.each(["2019-07-27", "2020-01-01", "2021-12-31", "2019-10-09", "2000-02-
   test("leaves the folders above a dated level alone, but excludes files directly in them", () => {
     const excluded = picomatch(patterns, { dot: true });
     expect(excluded("/m/Videos/Clips")).toBe(false);
-    expect(excluded("/m/Videos/Misc Snippets")).toBe(false);
+    expect(excluded("/m/Videos/Old Clips")).toBe(false);
     expect(excluded("/m/Videos/loose clip.mp4")).toBe(true);
     expect(excluded("/m/Pictures")).toBe(false);
   });
@@ -115,7 +115,7 @@ describe.each(["2019-07-27", "2020-01-01", "2021-12-31", "2019-10-09", "2000-02-
 describe("the crawler (fast-glob, as Immich calls it)", () => {
   const root = mkdtempSync(join(tmpdir(), "media-triage-crawl-"));
   afterAll(() => rmSync(root, { recursive: true, force: true }));
-  const since = "2019-07-27";
+  const since = "2020-06-15";
   const names = namesAround(since, 400, 99).filter((name) => !/[*?[\]{}()!\\]/.test(name));
   for (const name of names) {
     mkdirSync(join(root, "Pictures", name, "sub"), { recursive: true });
@@ -143,5 +143,5 @@ describe("the crawler (fast-glob, as Immich calls it)", () => {
 });
 
 test("one level's rejected names, for the record", () => {
-  expect(rejectedNames(parseDay("2019-07-27"))).toMatchSnapshot();
+  expect(rejectedNames(parseDay("2020-06-15"))).toMatchSnapshot();
 });

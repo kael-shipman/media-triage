@@ -3,8 +3,8 @@ import { dcSubject, isDarktableInternal, mergeTags, sameTags, toDarktable, toImm
 
 describe("translating between the tools", () => {
   test.each([
-    ["People|Ari", "People/Ari"],
-    ["Selected|Best-Of", "Selected/Best-Of"],
+    ["People|Robin", "People/Robin"],
+    ["Selected|Highlights", "Selected/Highlights"],
     ["Plain", "Plain"],
     ["Music|AC/DC", "Music/AC|DC"],
     ["A|B|C", "A/B/C"],
@@ -22,7 +22,7 @@ describe("translating between the tools", () => {
 });
 
 test("dc:subject holds every part of every tag, once", () => {
-  expect(dcSubject(["People|Ari Lumen", "Selected|Best-Of", "People|Sam"])).toEqual(["People", "Ari Lumen", "Selected", "Best-Of", "Sam"]);
+  expect(dcSubject(["People|Robin Example", "Selected|Highlights", "People|Sam"])).toEqual(["People", "Robin Example", "Selected", "Highlights", "Sam"]);
 });
 
 test("Darktable's own tags are recognized", () => {

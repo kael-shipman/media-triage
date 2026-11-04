@@ -3,7 +3,7 @@ import { titleProblem, titlesIn, titleTag, withTitle } from "./titles.ts";
 
 test("titles are the tags under Title/", () => {
   expect(titleTag("Beach Day")).toBe("Title/Beach Day");
-  expect(titlesIn(["People/Ari", "Title/Beach Day", "Titles/x", "Title/Other"])).toEqual(["Beach Day", "Other"]);
+  expect(titlesIn(["People/Robin", "Title/Beach Day", "Titles/x", "Title/Other"])).toEqual(["Beach Day", "Other"]);
 });
 
 test("withTitle replaces every title tag with one, or removes them", () => {
@@ -13,7 +13,7 @@ test("withTitle replaces every title tag with one, or removes them", () => {
 
 test.each([
   ["Beach Day", undefined],
-  ["Ari's 3rd Birthday (Grandma's)", undefined],
+  ["Robin's 3rd Birthday (Grandma's)", undefined],
   ["", "it's empty"],
   [" Beach", "it starts or ends with a space"],
   ["Beach/Day", 'holds a "/" or "|"'],

@@ -1,53 +1,53 @@
 import { describe, expect, test } from "bun:test";
 import { allowedSince, parseDay } from "./folder-dates.ts";
 
-const since = parseDay("2019-07-27");
+const since = parseDay("2020-06-15");
 
-describe("allowedSince 2019-07-27", () => {
+describe("allowedSince 2020-06-15", () => {
   test.each([
-    "2019.07.27 - Beach",
-    "2019-07-27",
-    "20190727_120000 - clip.mp4",
-    "2019.07.31",
-    "2019.08",
-    "2019-08-01 - Fair",
-    "201908",
-    "2019.08.00",
-    "2019.12.25 Xmas",
-    "2019-07.28 mixed",
-    "2020 Christmas",
+    "2020.06.15 - Beach",
+    "2020-06-15",
+    "20200615_120000 - clip.mp4",
+    "2020.06.30",
+    "2020.07",
+    "2020-07-01 - Fair",
+    "202007",
+    "2020.07.00",
+    "2020.12.25 Xmas",
+    "2020-06.16 mixed",
+    "2021 Christmas",
     "2023 - Misc",
-    "2020",
-    "20201225",
-    "2020abc",
+    "2021",
+    "20211225",
+    "2021abc",
     "2099",
   ])("allows %p", (name) => {
     expect(allowedSince(name, since)).toBe(true);
   });
 
   test.each([
-    "2019.07.26 - Picnic",
-    "2019.07 - July",
-    "2019.07",
-    "201907",
-    "2019.07.00 - month only",
-    "2019 Christmas",
-    "2019",
-    "2019.",
-    "2019.7.28",
-    "2019.13.01",
-    "2019.07.32",
-    "2019.00.10",
-    "2018.12.31",
-    "2012-02-05 - x",
-    "2014.12.25 Xmas",
-    "2015.06 - Wedding and Misc",
+    "2020.06.14 - Picnic",
+    "2020.06 - June",
+    "2020.06",
+    "202006",
+    "2020.06.00 - month only",
+    "2020 Christmas",
+    "2020",
+    "2020.",
+    "2020.6.16",
+    "2020.13.01",
+    "2020.06.32",
+    "2020.00.10",
+    "2019.12.31",
+    "2011-03-04 - x",
+    "2013.12.25 Xmas",
+    "2016.05 - Trip and Misc",
     "1999",
     "2100 plans",
     "Staging",
-    "Best-Of Photos",
-    "Leo on a Unicycle.MOV",
-    "4th of July",
+    "Highlights",
+    "Kid on a Unicycle.MOV",
+    "Summer Fair",
     "",
   ])("excludes %p", (name) => {
     expect(allowedSince(name, since)).toBe(false);
@@ -55,6 +55,6 @@ describe("allowedSince 2019-07-27", () => {
 });
 
 test("parseDay", () => {
-  expect(parseDay("2019-07-27")).toEqual({ year: 2019, month: 7, day: 27 });
-  expect(() => parseDay("2019.07.27")).toThrow("YYYY-MM-DD");
+  expect(parseDay("2020-06-15")).toEqual({ year: 2020, month: 6, day: 15 });
+  expect(() => parseDay("2020.06.15")).toThrow("YYYY-MM-DD");
 });

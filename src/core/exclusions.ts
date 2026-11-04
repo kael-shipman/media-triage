@@ -64,7 +64,7 @@ export function rejectedNames(since: Day): string[] {
   ];
   const rejectedMonths = [...numberRange(0, since.month - 1, 2), ...numberRange(13, 99, 2)];
   const rejectedDays = [...numberRange(0, since.day - 1, 2), ...numberRange(32, 99, 2)];
-  // Separated ("2019.07.27", "2019-07-27") and compact ("20190727"); the separated forms mark where each part ends.
+  // Separated ("2020.06.15", "2020-06-15") and compact ("20200615"); the separated forms mark where each part ends.
   for (const [separator, afterMonth] of [["[.-]", "[^.-]"], ["", "[^0-9]"]] as const) {
     const sep = separator;
     patterns.push(
