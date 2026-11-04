@@ -123,8 +123,16 @@ What milestone 5 gives it (`src/sidecars/`, `src/core/xmp.ts`):
    `SyncedValues`). Not yet filled: the sync stream consumer (step 4) adds assets, looking up new ones' paths in bulk
    with `libraryPages` on a first run, after a reset, or when a batch has many new assets, and one by one with
    `getAsset` otherwise; the reconcile (step 5) writes units.
-3. **The watcher:** inotify over the covered folders, a watch per folder, with the `fs.inotify.max_user_watches`
-   check (section 13). The full pass stats files and reads only sidecars that changed.
+3. [x] **The watcher and the full pass** (done 2026-11-04), in `src/sync/`, not yet started by the daemon (step 5 does
+   that, since the reconcile job is what consumes them):
+   - `covered.ts`: `coveredFolders(config)` (libraries' folders through the path map, plus the inbox's sources; none
+     inside another; unmapped ones reported), `unitOf(path)` (a change's unit: the media file, or the one a
+     `<file>.<ext>.xmp` belongs to; hidden, temporary, conflict and other sidecars ignored), and `watchWarning`
+     against `fs.inotify.max_user_watches` (warns past half, with the command to raise it).
+   - `watcher.ts`: `Watcher` (Bun's recursive `fs.watch`: one inotify instance, new folders included, checked) and
+     `DirtyUnits` (units taken once quiet for a moment, so a sidecar written in steps is acted on once).
+   - `full-pass.ts`: `fullPass(store, folders)`: stats only; returns units with no record or whose sidecar's stamp
+     changed.
 4. **The sync stream consumer**, per account: `syncStream` gives batches; act on a batch, then `acknowledge` its
    acks. A batch with `reset` is acknowledged and followed by a full read. `AssetFacesV3` reports other accounts'
    faces too (cluster group). Immich's own jobs touch a person again shortly after a face is added; the

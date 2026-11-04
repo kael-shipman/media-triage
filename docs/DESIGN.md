@@ -66,7 +66,12 @@ video. Units in the archive count as much as units in the inbox (section 1).
 
 1. **Files:** inotify on the covered folders (section 1), with a watch per folder. It sees files arriving from the
    phones, Darktable's sidecars, and Immich's sidecar writes. A full pass over the same folders at start, and then
-   daily, catches anything missed.
+   daily, catches anything missed (`src/sync/`).
+   - A unit is a media file Immich indexes and its `<file>.<ext>.xmp`, the one name Darktable reads. Other sidecar
+     names (`<stem>.xmp`, a Darktable duplicate's `<stem>_01.<ext>.xmp`), hidden and temporary files, and Syncthing's
+     conflict copies aren't synced.
+   - Bun's recursive `fs.watch` watches every folder, new ones included, with one inotify instance. Changes are acted
+     on once a unit has been quiet for a moment, since a sidecar can be written in several steps.
 2. **Immich, per account: its sync stream** (`POST /api/sync/stream`), the feed of changes the phone apps use. It
    asks for these types, all current in Immich 3.3 (which refuses `AssetsV1`: `sync.service.ts`, `syncAssetsV1`):
    - `AssetsV2`: trash (`deletedAt`), `isFavorite`, `visibility` (archived, locked), the library, the Live Photo's
