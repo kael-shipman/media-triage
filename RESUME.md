@@ -21,21 +21,27 @@ session stops partway.
   release server, with `systemctl` stubbed. shellcheck is clean (`npx shellcheck -s sh install.sh`).
 - **Builds:** `bun run build [version]` makes `dist/media-triage-linux-{x64,arm64}` (about 110 MB each) and
   `SHA256SUMS`. Checked: the executable reports its version, knows it's compiled, and embeds the example config.
-- **Workflows:** `ci.yml` (push and pull request) and `release.yml` (`v*` tags), not yet run on GitHub.
+- **Workflows:** `ci.yml` (every push and pull request: type check, tests, build) and `release.yml` (`v*` tags:
+  the same, then a GitHub release). Both pass on GitHub.
+- **Releases:** `v0.1.0-rc.1` and `v0.1.0-rc.2`, pre-releases made for the end-to-end check: the foundation only, no
+  triage yet.
+- **End-to-end check, passed 2026-11-03:** installed rc.1 with `curl … install.sh | sh` into a sandbox, ran its
+  daemon with `prerelease = true`, and it upgraded itself to rc.2 a minute later and exited with 75. Started again,
+  it ran rc.2 and scheduled its next check six hours out.
 - **`run` starts and stops cleanly. Its only job so far is the upgrade check.**
 - **Tests:** 88, all passing (`npx bun@1.4.4 test`), and the type check is clean.
 
 ## Next
 
-**Exactly what to do next:** milestone 1, step 5: CI and releases.
-1. `scripts/build.ts`: `bun build --compile` for `bun-linux-x64` and `bun-linux-arm64`, with
-   `--define MEDIA_TRIAGE_VERSION='"X.Y.Z"'` from the tag (or `package.json`), into `dist/`, plus `dist/SHA256SUMS`.
-   Check that a built executable reports its version and that `IS_COMPILED` is true in it.
-2. `.github/workflows/ci.yml` (on push and pull request: install, type check, test, build) and `release.yml` (on a
-   `v*` tag: the same, then a GitHub release with the two executables and `SHA256SUMS`, marked pre-release if the tag
-   has a hyphen).
-3. An end-to-end check: tag `v0.1.0-rc.1` and `v0.1.0-rc.2`; install rc.1 with `install.sh --prerelease --version`,
-   then run its daemon with `upgrade.prerelease = true` and watch it upgrade itself to rc.2 and exit 75.
+**Exactly what to do next:** milestone 2, step 1: tags (`src/core/tags.ts`, DESIGN.md F4).
+- Translating between the tools: Immich `A/B` ↔ Darktable `A|B`, where a `/` inside a Darktable part becomes `|` in
+  Immich (Immich's own `getTagList` conversion) and back.
+- `dc:subject`: every part of every hierarchical tag, once each.
+- Leaving out Darktable's `darktable|…` tags.
+- The three-way merge of tag sets against the last-synced set: additions and removals from any side, and a union
+  when there's no last-synced set.
+
+Pure functions, no I/O, with tests beside them.
 
 ## Milestones
 
@@ -47,7 +53,7 @@ Each step ends with tests passing, a commit, and this file updated.
    (`bun:sqlite`), logging.
 3. [x] Upgrades (`upgrade`, and the daemon's scheduled check), tested against a local fake release server.
 4. [x] The installer (`install.sh`).
-5. [ ] CI (`.github/workflows/ci.yml`) and releases (`release.yml`); a first pre-release to try the installer and an
+5. [x] CI (`.github/workflows/ci.yml`) and releases (`release.yml`); a first pre-release to try the installer and an
    upgrade end to end.
 
 **2. The pure rules** (`src/core/`, no I/O)

@@ -3,7 +3,9 @@
 A personal utility I use to manage my household's shared photos and videos. It's public in case it's useful to
 someone with a similar setup, but it's built for mine. Expect rough edges, and read the design before relying on it.
 
-> **Status: under construction. Not usable yet.** What's built and what's next: [RESUME.md](RESUME.md).
+> **Status: under construction. Not usable yet.** The foundation works: the command line, the configuration,
+> self-upgrading, the installer and releases. The triage itself isn't built yet. What's built and what's next:
+> [RESUME.md](RESUME.md).
 
 ## What it's for
 
