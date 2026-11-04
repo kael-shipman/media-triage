@@ -18,6 +18,14 @@ export async function runDaemon(config: Config, options: DaemonOptions): Promise
   const scheduler = new Scheduler();
   let exitStatus: number = EXIT.ok;
 
+  // Before anything is logged, so a signal right after starting still stops it cleanly.
+  const stop = (signal: string) => {
+    log.info("stopping", { signal });
+    scheduler.stop();
+  };
+  process.once("SIGTERM", () => stop("SIGTERM"));
+  process.once("SIGINT", () => stop("SIGINT"));
+
   log.info("media-triage starting", {
     version: VERSION,
     config: config.file,
@@ -58,13 +66,6 @@ export async function runDaemon(config: Config, options: DaemonOptions): Promise
       }
     });
   }
-
-  const stop = (signal: string) => {
-    log.info("stopping", { signal });
-    scheduler.stop();
-  };
-  process.once("SIGTERM", () => stop("SIGTERM"));
-  process.once("SIGINT", () => stop("SIGINT"));
 
   await scheduler.loop();
   state.close();
