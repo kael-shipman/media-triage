@@ -5,7 +5,9 @@
 // the daemon controls exactly which fields it reads and changes. Some values live in more than one field, because
 // Immich writes copies that it then reads first:
 // - the description: `dc:description`, and Immich's `tiff:ImageDescription`, which it reads first;
-// - the date: `exif:DateTimeOriginal`, and Immich's `photoshop:DateCreated`, which it reads first (MWG);
+// - the date: `exif:DateTimeOriginal`, and Immich's `photoshop:DateCreated`, which it reads first (MWG). Darktable
+//   reads the first and keeps the second, but has no time zones: it drops a date's offset when it reads one, and
+//   writes dates without. So the second holds the capture time with its offset (see `planWrite`);
 // - the tags: Darktable's `lr:hierarchicalSubject` and `dc:subject`, and Immich's `digiKam:TagsList`.
 // A copy is written only where it already exists, as Immich keeps it there.
 
@@ -158,10 +160,15 @@ export function immichReads(fields: XmpFields): ToolView {
   return strip({ tags: tags.filter((tag) => !isDarktableInternalInImmich(tag)), rating, description: description || undefined, date: fields.immichDate ?? fields.date });
 }
 
-/** What Darktable 5.6 reads (`src/common/exif.cc`): `lr:hierarchicalSubject`, or `dc:subject` without it. */
+/**
+ * What Darktable 5.6 reads (`src/common/exif.cc`): `lr:hierarchicalSubject`, or `dc:subject` without it;
+ * `exif:DateTimeOriginal`, or `photoshop:DateCreated` without it, without its offset (`datetime.c`,
+ * `dt_datetime_exif_to_numbers`).
+ */
 export function darktableReads(fields: XmpFields): ToolView {
   const tags = (fields.hierarchicalSubject ?? fields.subject ?? []).filter((tag) => !isDarktableInternal(tag)).map(toImmich);
-  return strip({ tags, rating: fields.rating, title: fields.title, description: fields.description, date: fields.date });
+  const date = fields.date ?? fields.immichDate;
+  return strip({ tags, rating: fields.rating, title: fields.title, description: fields.description, date: date && withoutOffset(date) });
 }
 
 function strip(view: ToolView): ToolView {
@@ -174,9 +181,39 @@ function strip(view: ToolView): ToolView {
 const OFFSET = /(Z|[+-]\d{2}:?\d{2})$/;
 
 /** A date's offset from UTC ("+02:00", "Z"), if it has one. */
-function offsetOf(date: string): string | undefined {
+export function offsetOf(date: string): string | undefined {
   const time = date.indexOf(" ") >= 0 ? date.slice(date.indexOf(" ")) : date.slice(10);
   return OFFSET.exec(time)?.[1];
+}
+
+/** A date without its offset: the wall time, as Darktable shows it. */
+export function withoutOffset(date: string): string {
+  const offset = offsetOf(date);
+  return offset === undefined ? date : date.slice(0, -offset.length);
+}
+
+/** A date with this offset, in place of any it had. */
+function withOffset(date: string, offset: string | undefined): string {
+  return offset === undefined ? date : `${withoutOffset(date)}${offset}`;
+}
+
+/** Whether two dates have the same wall time (to the second) and the same offset, or both none. */
+function sameZonedDate(a: string | undefined, b: string | undefined): boolean {
+  return sameDate(a, b) && (a === undefined || b === undefined || offsetOf(a) === offsetOf(b));
+}
+
+const pad2 = (value: number) => String(Math.trunc(value)).padStart(2, "0");
+
+/**
+ * An Immich asset's offset from UTC when it was taken, from its `localDateTime` (the wall time, written as if it were
+ * UTC) and `fileCreatedAt` (the moment), or undefined when Immich doesn't know its time zone (`exifInfo.timeZone`).
+ */
+export function offsetFromImmich(asset: { localDateTime: string; fileCreatedAt: string; timeZone?: string | null }): string | undefined {
+  if (!asset.timeZone) return undefined;
+  const minutes = Math.round((Date.parse(asset.localDateTime) - Date.parse(asset.fileCreatedAt)) / 60_000);
+  if (!Number.isFinite(minutes)) return undefined;
+  const sign = minutes < 0 ? "-" : "+";
+  return `${sign}${pad2(Math.abs(minutes) / 60)}:${pad2(Math.abs(minutes) % 60)}`;
 }
 
 /**
@@ -193,12 +230,6 @@ export function sameDate(a: string | undefined, b: string | undefined): boolean 
   return sameWall && (offsetA === undefined || offsetB === undefined || offsetA === offsetB);
 }
 
-/** A date without an offset takes the one the field had, since the tool that set it can't show offsets. */
-function keepOffset(date: string, current: string | undefined): string {
-  if (offsetOf(date) !== undefined || current === undefined) return date;
-  const offset = offsetOf(current);
-  return offset === undefined ? date : `${date}${offset}`;
-}
 
 // Writing.
 
@@ -214,6 +245,11 @@ export interface Wanted {
   /** In Immich's notation, without Darktable's own tags, which are left as they are in every field. */
   tags?: readonly string[];
   date?: string | null;
+  /**
+   * The capture time's offset from UTC ("+02:00"), when it's known from elsewhere (Immich, `offsetFromImmich`), for a
+   * date that has none and a sidecar that has none either.
+   */
+  offset?: string;
   gps?: { latitude: number; longitude: number } | null;
   /** Every account's state. Accounts with nothing to record aren't written. */
   accounts?: readonly AccountState[];
@@ -258,19 +294,21 @@ export function planWrite(fields: XmpFields, wanted: Wanted): Assignments {
     }
   }
 
-  if (wanted.date !== undefined) {
-    for (const [tag, current] of [
-      [TAGS.date, fields.date],
-      [TAGS.immichDate, fields.immichDate],
-    ] as const) {
-      if (tag === TAGS.immichDate && current === undefined) continue;
-      if (wanted.date === null) {
-        if (current !== undefined) set(tag, null);
-      } else {
-        const date = keepOffset(wanted.date, current);
-        if (!sameDate(date, current)) set(tag, date);
-      }
-    }
+  if (wanted.date === null) {
+    if (fields.date !== undefined) set(TAGS.date, null);
+    if (fields.immichDate !== undefined) set(TAGS.immichDate, null);
+  } else if (wanted.date !== undefined) {
+    // The capture time, with an offset if one is known: the date's own, or else the sidecar's (a date set in Darktable
+    // has none, and the zone didn't change), or else one known from elsewhere.
+    const offset = offsetOf(wanted.date) ?? (fields.immichDate && offsetOf(fields.immichDate)) ?? (fields.date && offsetOf(fields.date)) ?? wanted.offset;
+    const date = withOffset(wanted.date, offset);
+    // Immich's field holds it whole. It's added where it's missing only to keep an offset, which Darktable's own field
+    // loses each time Darktable writes the sidecar, but this one keeps.
+    const immich = fields.immichDate !== undefined ? !sameZonedDate(date, fields.immichDate) : offsetOf(date) !== undefined && offsetOf(fields.date ?? "") !== offsetOf(date);
+    // Darktable's field is written when its wall time changes, or along with Immich's. Only a lost offset isn't a
+    // reason to write: Darktable would drop it again, and list the sidecar as changed each time.
+    if (immich || !sameDate(date, fields.date)) set(TAGS.date, date);
+    if (immich) set(TAGS.immichDate, date);
   }
 
   if (wanted.gps !== undefined) {

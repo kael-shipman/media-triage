@@ -80,6 +80,30 @@ describeDarktable("Darktable keeps the daemon's fields", () => {
   });
 });
 
+describeDarktable("a capture time changed in Darktable", () => {
+  test("reaches Immich's field with its zone, and a later Darktable write needs nothing more", async () => {
+    const photo = join(dir, "photo.jpg");
+    copyFileSync(join(FIXTURES, "photo.jpg"), photo);
+    copyFileSync(join(FIXTURES, "immich.xmp"), `${photo}.xmp`);
+    await darktable(photo, '  image.exif_datetime_taken = "2021:06:15 11:45:00"');
+    const moved = (await readSidecar(exiftool, `${photo}.xmp`))!;
+    expect(darktableReads(moved.fields).date).toMatch(/^2021:06:15 11:45:00/);
+    expect(immichReads(moved.fields).date).toBe("2021:06:15 10:20:30.000+02:00");
+
+    // What the reconcile does with Darktable's change.
+    expect((await writeSidecar(exiftool, moved, { date: darktableReads(moved.fields).date! })).status).toBe("written");
+    const synced = (await readSidecar(exiftool, `${photo}.xmp`))!;
+    expect(immichReads(synced.fields).date).toMatch(/^2021:06:15 11:45:00(\.000)?\+02:00$/);
+    expect(sameDate(darktableReads(synced.fields).date, immichReads(synced.fields).date)).toBe(true);
+
+    // Darktable writes again (dropping the offset from its own field): nothing more to write.
+    await darktable(photo, "  image.rating = 3");
+    const again = (await readSidecar(exiftool, `${photo}.xmp`))!;
+    expect(again.fields.date).toMatch(/^2021:06:15 11:45:00(\.000)?$/);
+    expect(await writeSidecar(exiftool, again, { date: darktableReads(again.fields).date! })).toEqual({ status: "unchanged" });
+  });
+});
+
 describeImmich("Immich keeps the daemon's fields", () => {
   test("when it rewrites a sidecar Darktable wrote", async () => {
     const alex = await login(USERS.alex);

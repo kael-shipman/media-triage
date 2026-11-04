@@ -188,10 +188,27 @@ If the state is lost, merge as a union, which never drops a tag, and report it.
     `photoshop:DateCreated`. It reads `ImageDescription` before `Description`, and the date from MWG, which in a
     sidecar is `photoshop:DateCreated` (`metadata.service.ts`). Darktable reads and writes only `dc:description` and
     `exif:DateTimeOriginal`, so after Immich has written a sidecar, Darktable's edits to those two don't reach Immich.
-    So the daemon writes both copies, but each copy only where it already exists, as with `TagsList` (F4).
-  - **Darktable drops the date's offset.** It reads Immich's `2021-06-15T10:20:30.000+02:00` and writes
-    `2021:06:15 10:20:30.000`. Dates are compared by wall time, to the second, and by offset only when both have one.
-    A date written without an offset keeps the one the field had.
+    So the daemon writes both copies, but Immich's copy of the description only where it already exists, as with
+    `TagsList` (F4). Dates follow the rules below.
+  - **Darktable has no time zones, on purpose** (checked in 5.6.1's source). It drops a date's offset when it reads
+    one (`datetime.c`, `dt_datetime_exif_to_numbers`), writes dates without, and never reads EXIF's
+    `OffsetTimeOriginal`. It reads `exif:DateTimeOriginal`, or `photoshop:DateCreated` without it, and keeps the
+    second when it rewrites a sidecar. Its geotagging module's "apply offset" adds the offset to each photo's time and
+    stores the result: no offset is stored per photo.
+  - **So `photoshop:DateCreated` holds the capture time with its zone** (decided by the author, 2026-11-04: both tools
+    must always show the same capture time, and get the zoned one). The rules (`src/core/xmp.ts`, `planWrite`):
+    - **A date without an offset takes one:** the sidecar's (`photoshop:DateCreated`'s, then
+      `exif:DateTimeOriginal`'s), since a time set in Darktable has none and the zone didn't change; or else one known
+      from Immich (`offsetFromImmich`: its `localDateTime` minus `fileCreatedAt`, when it knows the zone).
+    - **`photoshop:DateCreated` is written whenever it differs,** by wall time or offset, and added where it's missing
+      only to keep an offset that `exif:DateTimeOriginal` doesn't hold.
+    - **`exif:DateTimeOriginal` is written when its wall time changes, or along with Immich's field.** An offset
+      Darktable dropped isn't a reason to write: Darktable would drop it again, and list the sidecar as changed each
+      time it starts.
+    - So a time changed in Darktable (by hand, or by its offset) reaches Immich with the zone it had, and both show
+      the same wall time. `src/sidecars/writers.test.ts` checks it with Darktable itself, along with the next Darktable
+      write needing nothing more.
+  - Dates are compared by wall time, to the second (Darktable keeps milliseconds, but shows seconds).
   - Ratings are `xmp:Rating` and GPS is `exif:GPSLatitude` and `exif:GPSLongitude` in both. Immich reads only ratings
     1 to 5 (F5).
 - **F7. Several accounts.** Each copy writes the whole sidecar from its own state. So an edit in one account can undo
@@ -562,6 +579,8 @@ with what changed, not with the size of the archive.
 - 2026-11-04: sync covers the whole archive, not just the inbox (section 1), and section 13 (scale) added. Section 3
   corrected from Immich 3.3.5's source: `AssetsV2` and `AlbumsV2` instead of the V1 types, the stream carries no
   paths, `AssetFacesV3` covers the cluster group, and resets.
+- 2026-11-04: capture times keep their zone in `photoshop:DateCreated`, and a time changed in Darktable reaches
+  Immich with it (F6), as the author asked: Darktable has no time zones by design.
 - 2026-11-04: sidecar I/O built (milestone 5). Found and written down: Immich's own copies of the description and date
   (F6), Darktable dropping the date's offset (F6), Immich showing Darktable's own tags (F4), and how regions'
   coordinates relate to Immich's faces (F10). Checked that Immich and Darktable keep the namespace and regions (F9,

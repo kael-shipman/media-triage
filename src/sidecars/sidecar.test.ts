@@ -141,7 +141,7 @@ describe("writing", () => {
     await writeSidecar(exiftool, sidecar, { description: "Changed", date: "2021:06:16 08:00:00" });
     const after = (await readSidecar(exiftool, path))!;
     expect(immichReads(after.fields)).toMatchObject({ description: "Changed", date: "2021:06:16 08:00:00+02:00" });
-    expect(darktableReads(after.fields)).toMatchObject({ description: "Changed", date: "2021:06:16 08:00:00+02:00" });
+    expect(darktableReads(after.fields)).toMatchObject({ description: "Changed", date: "2021:06:16 08:00:00" });
   });
 
   test("awkward values come back exactly as written", async () => {

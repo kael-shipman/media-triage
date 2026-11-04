@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { type XmpFields, TAGS, darktableReads, immichReads, parseXmp, planWrite, sameDate } from "./xmp.ts";
+import { type XmpFields, TAGS, darktableReads, immichReads, offsetFromImmich, parseXmp, planWrite, sameDate } from "./xmp.ts";
 
 /** What exiftool reads from a sidecar Darktable wrote, in the shape src/sidecars/ asks for (every value quoted). */
 const darktableRaw = {
@@ -93,6 +93,11 @@ describe("what each tool reads", () => {
     expect(darktableReads({ subject: ["Lake", "Sky"] }).tags).toEqual(["Lake", "Sky"]);
   });
 
+  test("Darktable reads dates without their offsets, and falls back to Immich's", () => {
+    expect(darktableReads(immichFields).date).toBe("2020:06:15 10:30:00.000");
+    expect(darktableReads({ immichDate: "2020:06:15 10:30:00-05:00" }).date).toBe("2020:06:15 10:30:00");
+  });
+
   test("Immich: TagsList first, its own copies of the description and date first, ratings 1 to 5 only", () => {
     const stale = { ...immichFields, description: "Changed in Darktable", date: "2021:01:01 09:00:00.000", rating: -1 };
     expect(immichReads(stale)).toEqual({ tags: ["Places/Lake"], description: "A day out", date: "2020:06:15 10:30:00.000+02:00" });
@@ -179,12 +184,64 @@ describe("planWrite", () => {
     expect(planWrite({ hierarchicalSubject: ["B", "A"], subject: ["A", "B"] }, { tags: ["A", "B"] })).toEqual({});
   });
 
-  test("the date is also written to Immich's copy where it has one, keeping its offset", () => {
-    // Darktable moved the date: Immich still reads its own copy, so that's the field to fix.
-    const moved = { ...immichFields, date: "2020:06:15 11:00:00.000" };
-    expect(planWrite(moved, { date: "2020:06:15 11:00:00.000" })).toEqual({ [TAGS.immichDate]: "2020:06:15 11:00:00.000+02:00" });
-    expect(planWrite({ date: "2020:06:15 10:30:00" }, { date: "2020:06:15 11:00:00" })).toEqual({ [TAGS.date]: "2020:06:15 11:00:00" });
-    expect(planWrite(immichFields, { date: null })).toEqual({ [TAGS.date]: null, [TAGS.immichDate]: null });
+  describe("dates: both tools show the same capture time, and the offset is kept where Darktable keeps it", () => {
+    test("Darktable moved the time: both fields get it, with the zone it had", () => {
+      const moved = { ...immichFields, date: "2020:06:15 11:00:00.000" };
+      expect(planWrite(moved, { date: "2020:06:15 11:00:00.000" })).toEqual({
+        [TAGS.date]: "2020:06:15 11:00:00.000+02:00",
+        [TAGS.immichDate]: "2020:06:15 11:00:00.000+02:00",
+      });
+    });
+
+    test("Darktable only dropped the offset: nothing to write, since Immich reads its own field", () => {
+      expect(planWrite({ ...immichFields, date: "2020:06:15 10:30:00.000" }, { date: "2020:06:15 10:30:00.000" })).toEqual({});
+    });
+
+    test("an offset known from elsewhere is kept in Immich's field, which Darktable doesn't drop", () => {
+      expect(planWrite({ date: "2020:06:15 10:30:00.000" }, { date: "2020:06:15 10:30:00.000", offset: "-05:00" })).toEqual({
+        [TAGS.date]: "2020:06:15 10:30:00.000-05:00",
+        [TAGS.immichDate]: "2020:06:15 10:30:00.000-05:00",
+      });
+      // The sidecar's own offset comes first.
+      expect(planWrite(immichFields, { date: "2020:06:15 10:30:00", offset: "-05:00" })).toEqual({});
+    });
+
+    test("without any offset, only Darktable's field", () => {
+      expect(planWrite({ date: "2020:06:15 10:30:00" }, { date: "2020:06:15 11:00:00" })).toEqual({ [TAGS.date]: "2020:06:15 11:00:00" });
+    });
+
+    test("a new zone from Immich replaces the old one in both", () => {
+      expect(planWrite(immichFields, { date: "2020:06:15 10:30:00.000-05:00" })).toEqual({
+        [TAGS.date]: "2020:06:15 10:30:00.000-05:00",
+        [TAGS.immichDate]: "2020:06:15 10:30:00.000-05:00",
+      });
+    });
+
+    test("removing the date removes both", () => {
+      expect(planWrite(immichFields, { date: null })).toEqual({ [TAGS.date]: null, [TAGS.immichDate]: null });
+    });
+
+    test("after any of these, both tools show the same wall time", () => {
+      const cases: [XmpFields, string, string | undefined][] = [
+        [{ ...immichFields, date: "2020:06:15 11:00:00.000" }, "2020:06:15 11:00:00.000", undefined],
+        [{ date: "2020:06:15 10:30:00.000" }, "2020:06:15 10:30:00.000", "-05:00"],
+        [immichFields, "2021:01:01 09:00:00", undefined],
+      ];
+      for (const [fields, date, offset] of cases) {
+        const plan = planWrite(fields, { date, offset });
+        const after: XmpFields = { ...fields };
+        if (TAGS.date in plan) after.date = plan[TAGS.date] as string;
+        if (TAGS.immichDate in plan) after.immichDate = plan[TAGS.immichDate] as string;
+        expect(sameDate(darktableReads(after).date, immichReads(after).date)).toBe(true);
+      }
+    });
+  });
+
+  test("an Immich asset's offset, from its local and UTC times", () => {
+    const asset = { localDateTime: "2021-06-15T10:20:30.000Z", fileCreatedAt: "2021-06-15T08:20:30.000Z", timeZone: "Europe/Paris" };
+    expect(offsetFromImmich(asset)).toBe("+02:00");
+    expect(offsetFromImmich({ ...asset, fileCreatedAt: "2021-06-15T15:50:30.000Z", timeZone: "UTC-5:30" })).toBe("-05:30");
+    expect(offsetFromImmich({ ...asset, timeZone: null })).toBeUndefined();
   });
 
   test("GPS is written as a pair, and removed", () => {

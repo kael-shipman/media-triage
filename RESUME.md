@@ -69,7 +69,8 @@ doesn't start exiftool yet: nothing syncs or files.
 **Found while building milestone 5** (also in DESIGN.md, each with a test):
 - Immich writes the description and date twice (`tiff:ImageDescription`, `photoshop:DateCreated`) and reads its own
   copies first, so Darktable's edits don't reach it unless the daemon updates those copies (F6);
-- Darktable drops a date's offset when it rewrites a sidecar Immich wrote, so dates compare by wall time (F6);
+- Darktable has no time zones by design (it drops offsets, and never reads `OffsetTimeOriginal`), so dates compare by
+  wall time, and `photoshop:DateCreated`, which Darktable keeps, holds the capture time with its zone (F6, below);
 - Immich shows Darktable's own tags (`darktable/format/jpg`) when a sidecar has no `TagsList` (F4);
 - Immich and Darktable both keep the daemon's namespace and face regions when they rewrite a sidecar (F9, F10);
 - a region's coordinates are in the stored image, and Immich rotates them by the orientation (F10);
@@ -80,6 +81,10 @@ doesn't start exiftool yet: nothing syncs or files.
 ## Decided by the author, 2026-11-04
 
 These shape milestone 6; DESIGN.md has each.
+- **Capture times: both tools always show the same one, and get the zoned one** (F6). Built in `planWrite` (a time
+  changed in Darktable is written to both date fields with the zone it had; an offset Darktable merely dropped isn't
+  rewritten), and checked with Darktable itself. Milestone 6's reconcile passes Darktable's date
+  (`darktableReads(...).date`) or the merged one as `date`, and `offset: offsetFromImmich(asset)` when it has a copy.
 - **F5, rejects Immich resets: not handled.** The author triages in one tool at a time and deletes the photos
   rejected in Darktable right after triaging; Immich doesn't rewrite sidecars in the background meanwhile. So nothing
   puts a `-1` back, and `x:xmptk` is only read for `media-triage sidecar`.
@@ -106,7 +111,8 @@ What milestone 5 gives it (`src/sidecars/`, `src/core/xmp.ts`):
 - `immichReads` and `darktableReads` say what each tool sees in a sidecar (tags in Immich's notation, without
   Darktable's own): those are the sides the merge compares, with each copy's API values. `Wanted` is what the merge
   decides; the Immich copies of the description and date, and `TagsList`, follow by themselves.
-- `sameDate` compares dates as both tools can show them. `regionFromFace` needs the asset's `exifInfo.orientation`.
+- `sameDate` compares dates as both tools can show them; `offsetFromImmich` gives a copy's zone as an offset.
+  `regionFromFace` needs the asset's `exifInfo.orientation`.
 
 1. **First, take the check out of upkeep.** Upkeep is one scheduler job, and the scheduler runs one job at a time.
    After changing a library, upkeep waits up to 30 minutes for Immich's scans so the check sees the result, and
