@@ -1,10 +1,11 @@
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from "bun:test";
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { FIXTURES, USERS, api, configFor, describeImmich, login, mediaFolder, newUser, waitFor } from "../../test/immich/harness.ts";
 import { PathMap } from "../core/path-map.ts";
-import type { AccountState, XmpFields } from "../core/xmp.ts";
+import { type AccountState, type XmpFields, darktableReads } from "../core/xmp.ts";
+import { fileBatch } from "../filing/file.ts";
 import { type Asset, getAsset } from "../immich/assets.ts";
 import { loginAccount } from "../immich/login.ts";
 import { Exiftool } from "../sidecars/exiftool.ts";
@@ -81,7 +82,7 @@ test("a unit whose media file is gone is only noted as gone, for its orphan side
  * `inbox`, the folder is an inbox and the photo is in its source "Phone", whose creator is Alex Example, and the
  * settle time is a second.
  */
-async function twoAccounts(prefix: string, options: { inbox?: boolean } = {}) {
+async function twoAccounts(prefix: string, options: { inbox?: boolean; admin?: boolean } = {}) {
   const admin = await login(USERS.alex);
   const [one, two] = [await newUser(admin.accessToken, "One"), await newUser(admin.accessToken, "Two")];
   const folder = mediaFolder(prefix);
@@ -90,13 +91,19 @@ async function twoAccounts(prefix: string, options: { inbox?: boolean } = {}) {
     [
       { name: "one", user: one },
       { name: "two", user: two },
+      ...(options.admin ? [{ name: "alex", user: USERS.alex }] : []),
     ],
-    options.inbox ? { paths: { inbox: folder.local }, sources: [{ folder: "Phone", creator: "Alex Example" }], timing: { settle: "1s" } } : {},
+    options.inbox
+      ? { paths: { inbox: folder.local, archive: folder.local }, sources: [{ folder: "Phone", creator: "Alex Example" }], timing: { settle: "1s" } }
+      : {},
   );
   await loginAccount(config, "one", one.password);
   await loginAccount(config, "two", two.password);
-  const accounts = (await openAccounts(config)).open;
-  const byName = new Map(accounts.map((account) => [account.account.name, account]));
+  if (options.admin) await loginAccount(config, "alex", USERS.alex.password);
+  const all = (await openAccounts(config)).open;
+  const byName = new Map(all.map((account) => [account.account.name, account]));
+  // The admin, if it's configured, owns no copies: it's there for scanning.
+  const accounts = all.filter((account) => account.account.name !== "alex");
 
   const unit = join(folder.local, ...(options.inbox ? ["Phone"] : []), "photo.jpg");
   mkdirSync(dirname(unit), { recursive: true });
@@ -304,5 +311,61 @@ describeImmich("reconciling a unit with two accounts' copies", () => {
     const untitled = await reconcile(ctx, [unit]);
     expect(untitled.notReady).toEqual([{ unit, why: "it has no title" }]);
     expect((await readSidecar(exiftool, `${unit}.xmp`))!.fields.hierarchicalSubject).toContain("Promote|Needs a title");
+  }, 180_000);
+
+  test("filing moves a ready unit into Pictures, Immich finds it there, and its state is held until it's put back", async () => {
+    const { unit, folder, accounts, store, map, ctx, copy, settled, token } = await twoAccounts("filing", { inbox: true, admin: true });
+    const tagsOf = (asset: Asset) => (asset.tags ?? []).map((tag) => tag.value).sort();
+    const sync = async () => {
+      for (const account of accounts) await consumeStream(account, store, map, { act: async (units) => void (await reconcile(ctx, units)) });
+    };
+    await sync();
+
+    // One favorites its copy, which the sidecar records (F9).
+    const old = { one: copy("one").id, two: copy("two").id };
+    await api("PUT", "/assets", { token: await token("one"), body: { ids: [old.one], isFavorite: true } });
+    await waitFor("the favorite in the sidecar", async () => {
+      await sync();
+      return (await readSidecar(exiftool, `${unit}.xmp`))!.fields.accounts?.[0]?.favorite ? true : undefined;
+    });
+
+    // Tagged Promote in Darktable; ready once both copies have read it.
+    const sidecar = (await readSidecar(exiftool, `${unit}.xmp`))!;
+    await writeSidecar(exiftool, sidecar, { tags: [...darktableReads(sidecar.fields).tags, "Promote"] });
+    await reconcile(ctx, [unit]);
+    await settled("Promote on both copies", (a, b) => tagsOf(a).includes("Promote") && tagsOf(b).includes("Promote"));
+    await Bun.sleep(1100);
+    const { ready } = await reconcile(ctx, [unit]);
+    expect(ready).toHaveLength(1);
+
+    const report = await fileBatch(ctx, ready);
+    const destination = join(folder.local, "Pictures", "2021.06.15 - Lake day", "2021.06.15-10.20.30 - Alex Example.jpg");
+    expect(report).toEqual({ filed: [{ unit, destination }], problems: [] });
+    expect(existsSync(unit)).toBe(false);
+
+    // Immich scans: the new copies appear, without Promote, and the old ones go offline.
+    const fresh = await waitFor("both new copies", async () => {
+      for (const account of accounts) await learnAllAssets(account, store, map);
+      const found = store.assetsAt(destination);
+      return found.length === 2 ? found : undefined;
+    });
+    await waitFor("the old copies offline", async () => {
+      const olds = await Promise.all([getAsset(ctx.accounts.get("one")!.client, old.one), getAsset(ctx.accounts.get("two")!.client, old.two)]);
+      return olds.every((asset) => !asset || asset.isOffline) ? true : undefined;
+    });
+    const newOne = (await getAsset(ctx.accounts.get("one")!.client, fresh.find((record) => record.account === "one")!.id))!;
+    expect(newOne.isFavorite).toBe(false);
+    await waitFor("the new copy's metadata", async () => {
+      const asset = await getAsset(ctx.accounts.get("one")!.client, newOne.id);
+      return asset?.exifInfo?.rating === 3 ? true : undefined;
+    });
+    expect(tagsOf((await getAsset(ctx.accounts.get("one")!.client, newOne.id))!)).not.toContain("Promote");
+
+    // Held: the new copies aren't favorites yet, but the sidecar keeps what filing will put back.
+    await sync();
+    await reconcile(ctx, [destination]);
+    expect((await readSidecar(exiftool, `${destination}.xmp`))!.fields.accounts).toEqual([
+      { user: ctx.accounts.get("one")!.userId, favorite: true, visibility: "timeline", albums: [] },
+    ]);
   }, 180_000);
 });

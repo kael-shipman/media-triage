@@ -4,7 +4,7 @@ import { EXIT } from "./exit.ts";
 import { log } from "./log.ts";
 import { Scheduler } from "./scheduler.ts";
 import { State } from "./state.ts";
-import { STREAM_INTERVAL_MS, Sync } from "./sync/job.ts";
+import { FILING_INTERVAL_MS, STREAM_INTERVAL_MS, Sync } from "./sync/job.ts";
 import { upgrade } from "./upgrade.ts";
 import { checkJob, upkeepJob } from "./upkeep/upkeep.ts";
 import { IS_COMPILED, VERSION } from "./version.ts";
@@ -55,6 +55,8 @@ export async function runDaemon(config: Config, options: DaemonOptions): Promise
     scheduler.trigger("sync");
   });
   scheduler.add("sync", { intervalMs: STREAM_INTERVAL_MS, firstInMs: 0 }, () => sync.run());
+  // Filing (DESIGN.md, section 7): every minute, or sooner when a unit is only waiting out the settle time.
+  scheduler.add("filing", { intervalMs: FILING_INTERVAL_MS, firstInMs: 0 }, () => sync.file());
 
   if (config.upgrade.enabled && !IS_COMPILED) {
     log.info("automatic upgrades are on, but this runs from source, so it won't upgrade itself");

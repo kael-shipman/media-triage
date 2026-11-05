@@ -162,7 +162,7 @@ function toUnit(row: UnitRow): UnitRecord {
 }
 
 export class SyncStore {
-  constructor(private readonly db: Database) {}
+  constructor(readonly db: Database) {}
 
   /** Adds or replaces assets. */
   putAssets(records: readonly AssetRecord[]): void {
@@ -383,6 +383,15 @@ export class SyncStore {
       .all(like)
       .map((row) => row.path)
       .filter((path) => path.startsWith(prefix) && !/[./]/.test(path.slice(prefix.length)));
+  }
+
+  /** The units in these folders (or below) whose last-synced tags include `tag`: filing's candidates. */
+  unitsTagged(folders: readonly string[], tag: string): string[] {
+    const query = this.db.query<{ path: string }, [string, string]>(
+      `select path from units where substr(path, 1, length(?1)) = ?1
+       and exists (select 1 from json_each(units.synced, '$.tags') where value = ?2) order by path`,
+    );
+    return folders.flatMap((folder) => query.all(`${folder.replace(/\/+$/, "")}/`, tag).map((row) => row.path));
   }
 
   /**

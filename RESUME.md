@@ -9,12 +9,12 @@ session stops partway. Each step ends with tests passing, the type check clean, 
 green.
 
 **Last updated:** 2026-11-04. Milestones 1–7 of 8 are done. **Milestone 8, filing** (DESIGN.md section 7) is
-planned below; steps 1 and 2 are done, **next is step 3**.
+planned below; steps 1–3 are done, **next is step 4**.
 
 ## Working on it
 
 - **Bun 1.4** runs and builds it. Without Bun installed, `npx --yes bun@1.4.4` stands in for `bun`:
-  - `bun test`: the unit tests (386; 384 in CI, which skips the two that need Darktable), and the integration tests,
+  - `bun test`: the unit tests (390; 388 in CI, which skips the two that need Darktable), and the integration tests,
     skipped;
   - `bun run typecheck`: TypeScript, over `src/`, `scripts/` and `test/`;
   - `bun run build [version]`: executables for linux-x64 and linux-arm64 in `dist/` (`TARGETS=linux-x64` for one).
@@ -22,7 +22,7 @@ planned below; steps 1 and 2 are done, **next is step 3**.
   `127.0.0.1:2284`, with made-up users (`alex@example.com`, the admin, and `sam@example.com`).
   - `bun run immich up` starts it (about a minute) and `bun run immich down` deletes everything. Leave it down when
     you stop: its database is in memory anyway.
-  - `MEDIA_TRIAGE_IMMICH_TESTS=1 bun test` runs everything against it (425 tests). Run it twice in a row on one
+  - `MEDIA_TRIAGE_IMMICH_TESTS=1 bun test` runs everything against it (439 tests). Run it twice in a row on one
     instance before calling a step done: tests must not depend on what other tests left behind.
   - Shared test helpers are in `test/immich/harness.ts`: `describeImmich`, `mediaFolder`, `photos`,
     `indexedLibrary`, `newUser` (fresh users, for anything that changes an account for good, such as joining a
@@ -57,9 +57,11 @@ planned below; steps 1 and 2 are done, **next is step 3**.
 | Per-account state (F9): favorites, visibility and albums, from each copy and the stream's albums | `src/sync/reconcile.ts` (`accountStates`), `store.ts`, `stream.ts` | 7 |
 | Named faces (F10): faces and people from the streams, `People/<name>` tags and regions | `src/core/faces.ts`, `src/sync/reconcile.ts` (`namedFaces`), `store.ts`, `stream.ts` | 7 |
 | Orphan sidecars (F11): found by the full pass, deleted once seen gone for the grace period | `src/sync/orphans.ts`, `full-pass.ts` | 7 |
+| Filing: readiness, the plan, moving, the filing job | `src/core/filing.ts`, `src/filing/`, `src/sync/job.ts` (`file`) | 8 |
 
 **The daemon's jobs:** account upkeep and the check, the full pass (with orphan sidecars, F11) and sync (F1–F10
-without F5), and the upgrade check. Nothing files yet.
+without F5), filing (moving, not yet putting back), and the
+upgrade check.
 
 **Found in Immich 3.3.5 while building milestones 3 and 4** (each is in DESIGN.md, and each has a test):
 - the sync stream refuses `AssetsV1` (use `AssetsV2`), carries no paths, and `AssetFacesV3` covers the whole cluster
@@ -123,7 +125,9 @@ catching-up rule (`ReconcileContext.refreshing`).
    delete): destinations for the media file, its sidecar, a Live Photo's video and its sidecar;
    collisions across the batch and on disk; the date (the sidecar's, else Immich's `localDateTime`), the creator, the
    root (photos or videos). Migration 6: a `filings` table (the unit, its moves, its old assets, its status).
-3. **Moving:** remove `Promote` and `Promote/Needs a title` from the sidecar, record the plan, `link()` then
+3. [x] **Moving** (done 2026-11-04: `src/filing/file.ts`, `fileBatch`, `finishPlanned`; the reconcile's hold; the
+   daemon's `filing` job, `Sync.file` in `src/sync/job.ts`; tested on temporary files, `file.test.ts`, and end to end,
+   "filing moves a ready unit…" in `reconcile.test.ts`. Until step 4, a filed unit stays held, "restoring", for good): remove `Promote` and `Promote/Needs a title` from the sidecar, record the plan, `link()` then
    `unlink()` each file (refusing other filesystems and existing names), carry the unit's record to the new path
    (F10's made tags and regions with it), finish an interrupted batch at start, and ask Immich to scan the libraries
    holding the old and new paths (admin session). The daemon's `filing` job runs every minute over inbox units tagged

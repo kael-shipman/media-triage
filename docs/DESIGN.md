@@ -425,10 +425,22 @@ per-account state (F9) and its named faces' tags and regions (F10) as they are, 
 done with it.
 
 **How it runs** (`src/filing/`): a unit becomes ready only once it has been left alone for the settle time, and
-nothing else happens then to wake the daemon. So filing is a job of its own, every minute: it reconciles the inbox
-units tagged `Promote`, then files those that are ready. After moving a batch it asks Immich to scan the libraries
-holding the old and new paths (with the admin's session), since Immich notices neither the new files nor the old
-ones going until a scan.
+nothing else happens then to wake the daemon. So filing is a job of its own, every minute (sooner when a unit is only
+waiting out the settle time): it reconciles the inbox units tagged `Promote`, then files those that are ready
+(`fileBatch`):
+- **The batch is planned, and the plans recorded** (the `filings` table), before anything moves.
+- **Each unit, in turn:** `Promote` (and `Promote/Needs a title`) out of its sidecar, written from the sidecar as it
+  was when the unit was found ready, so a change since stops the move and the unit is looked at afresh; then every
+  file linked at its new name, each checked to be this very file if the name exists; then the old names removed; then
+  the unit's sync record moved to the new path, so the next merge has its base and F10 still knows what it made. Then
+  the unit is being put back, and held (above).
+- **A plan cut short** is finished on the next run (`finishPlanned`), each step made again only if it isn't done. One
+  that meets a problem (a new name taken by another file, a file gone) stays planned for a person, and is tried again
+  only when the daemon starts.
+- **Immich is asked to scan** the libraries holding the old and new paths (with the admin's session), since it
+  notices neither the new files nor the old ones going until a scan. Without the admin's session, it sees them at its
+  next scheduled scan.
+- **A dry run** logs what it would file, where, and moves nothing.
 
 ## 8. Account upkeep
 

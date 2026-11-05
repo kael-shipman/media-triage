@@ -1,19 +1,24 @@
 // Sync in the daemon (DESIGN.md, sections 3, 5 and 13). The watcher and the full pass mark units dirty; the sync job
 // reads each account's stream, reconciling each batch before acknowledging it, then reconciles the dirty units once
-// they've been quiet for a moment, a limited number per run so other jobs aren't held up by a long first run.
+// they've been quiet for a moment, a limited number per run so other jobs aren't held up by a long first run. The
+// filing job (section 7) shares its state, exiftool and accounts.
 
 import fastGlob from "fast-glob";
+import { join } from "node:path";
 import type { Config } from "../config.ts";
+import { PROMOTE_TAG } from "../core/naming.ts";
 import { PathMap } from "../core/path-map.ts";
+import { fileBatch, finishPlanned } from "../filing/file.ts";
+import { FilingStore } from "../filing/store.ts";
 import { log } from "../log.ts";
 import type { RunResult } from "../scheduler.ts";
 import { Exiftool } from "../sidecars/exiftool.ts";
 import type { State } from "../state.ts";
-import { openAccounts } from "../upkeep/accounts.ts";
+import { type OpenAccount, openAccounts } from "../upkeep/accounts.ts";
 import { type Covered, coveredFolders, watchAllowance, watchWarning } from "./covered.ts";
 import { fullPass } from "./full-pass.ts";
 import { handleOrphans } from "./orphans.ts";
-import { type Refreshing, reconcile } from "./reconcile.ts";
+import { type ReconcileContext, type Refreshing, reconcile } from "./reconcile.ts";
 import { SyncStore } from "./store.ts";
 import { consumeStream, learnAllAssets } from "./stream.ts";
 import { DirtyUnits, Watcher } from "./watcher.ts";
@@ -24,6 +29,8 @@ export const QUIET_MS = 2000;
 export const STREAM_INTERVAL_MS = 60_000;
 /** The most dirty units reconciled in one run. */
 export const UNITS_PER_RUN = 200;
+/** How often the filing job looks at the inbox units tagged Promote. */
+export const FILING_INTERVAL_MS = 60_000;
 
 export interface SyncOptions {
   dryRun: boolean;
@@ -37,6 +44,10 @@ export class Sync {
   private watcher: Watcher | undefined;
   /** A dry run reads the streams once, since it acknowledges nothing and would read them whole each time. */
   private streamed = false;
+  /** Whether the filing job has run since the daemon started: plans with problems are retried once then. */
+  private filedBefore = false;
+  /** The filing problems last logged, by unit, so each is logged when it first appears. */
+  private filingProblems = new Map<string, string>();
   /** Copies catching up after a refresh (src/sync/reconcile.ts). */
   private readonly refreshing = new Map<string, Refreshing>();
 
@@ -96,11 +107,25 @@ export class Sync {
     }
   }
 
-  /** The sync job: each account's stream, then the dirty units. */
-  async run(): Promise<RunResult | void> {
+  /** What the reconcile and filing need, with every account that can be opened now. */
+  private async context(): Promise<{ ctx: ReconcileContext; accounts: OpenAccount[] }> {
     const accounts = await openAccounts(this.config);
     for (const { account, problem } of accounts.problems) log.warn("account left out of sync", { account: account.name, problem });
-    const ctx = { config: this.config, store: this.store, exiftool: this.exiftool, accounts: new Map(accounts.open.map((open) => [open.account.name, open])), dryRun: this.options.dryRun, refreshing: this.refreshing };
+    const ctx: ReconcileContext = {
+      config: this.config,
+      store: this.store,
+      exiftool: this.exiftool,
+      accounts: new Map(accounts.open.map((open) => [open.account.name, open])),
+      dryRun: this.options.dryRun,
+      refreshing: this.refreshing,
+    };
+    return { ctx, accounts: accounts.open };
+  }
+
+  /** The sync job: each account's stream, then the dirty units. */
+  async run(): Promise<RunResult | void> {
+    const { ctx, accounts: open } = await this.context();
+    const accounts = { open };
 
     if (!(this.options.dryRun && this.streamed)) {
       for (const account of accounts.open) {
@@ -126,6 +151,32 @@ export class Sync {
     const { units, nextInMs } = this.dirty.take(QUIET_MS, UNITS_PER_RUN);
     if (units.length > 0) await reconcile(ctx, units);
     return nextInMs === undefined ? undefined : { nextInMs };
+  }
+
+  /**
+   * The filing job (DESIGN.md, section 7): finishes plans a run left unfinished, then reconciles the inbox units tagged
+   * Promote, which says which are ready, and files those. Looks again sooner when a unit is only waiting out the settle
+   * time. Problems are logged when they first appear, not every run.
+   */
+  async file(): Promise<RunResult | void> {
+    const { ctx } = await this.context();
+    const finished = await finishPlanned(ctx, { retryProblems: !this.filedBefore });
+    this.filedBefore = true;
+    if (!this.config.paths.inbox || this.options.signal?.aborted) return;
+    const sources = this.config.sources.map((source) => join(this.config.paths.inbox!, source.folder));
+    const filings = new FilingStore(this.store.db);
+    const candidates = this.store.unitsTagged(sources, PROMOTE_TAG).filter((unit) => filings.get(unit)?.status !== "planned");
+    const report = candidates.length > 0 ? await reconcile(ctx, candidates) : undefined;
+    const filed = report ? await fileBatch(ctx, report.ready) : { filed: [], problems: [] };
+
+    const problems = new Map([...finished.problems, ...filed.problems].map(({ unit, problem }) => [unit, problem]));
+    for (const { unit, why } of report?.notReady ?? []) if (why === "it has no title") problems.set(unit, "it's tagged Promote, but has no title");
+    for (const [unit, problem] of problems) if (this.filingProblems.get(unit) !== problem) log.warn("not filed", { unit, problem });
+    this.filingProblems = problems;
+    if (filed.filed.length > 0) log.info(this.options.dryRun ? "would file (dry run)" : "filed a batch", { units: filed.filed.length });
+
+    const soonest = Math.min(...(report?.notReady ?? []).flatMap((unit) => (unit.inMs !== undefined ? [unit.inMs] : [])));
+    return Number.isFinite(soonest) && soonest < FILING_INTERVAL_MS ? { nextInMs: Math.max(1000, soonest) } : undefined;
   }
 
   async close(): Promise<void> {

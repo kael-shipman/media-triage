@@ -347,11 +347,15 @@ async function reconcileUnit(
   }
   const { merged } = result;
 
+  // While filing puts a unit's state back on its new copies, its per-account state and named faces are held as they
+  // are: the new copies have neither yet (section 7, "Holding the unit").
+  const held = store.isBeingPutBack(unit);
+
   // F10: named faces' tags and, for photos, regions, one way from Immich's faces, from every copy the store knows (the
   // faces and names are the store's, so no session is needed). A unit with no copy at all is left as it is.
   let faces: FacesOutcome | undefined;
   const allRecords = store.assetsAt(unit);
-  if (fields && allRecords.length > 0) {
+  if (fields && allRecords.length > 0 && !held) {
     const shown = copies[0]?.asset;
     const orientation = Number(shown?.exifInfo?.orientation ?? undefined);
     faces = applyFaces({
@@ -379,7 +383,7 @@ async function reconcileUnit(
     }
     if (merged.gps !== null) wanted.gps = merged.gps;
     if (source && !fields.creator?.length) wanted.creator = source.creator;
-    wanted.accounts = accountStates(store, records, new Map(copies.map((copy) => [copy.asset.id, copy.asset])), fields.accounts ?? []);
+    if (!held) wanted.accounts = accountStates(store, records, new Map(copies.map((copy) => [copy.asset.id, copy.asset])), fields.accounts ?? []);
     if (faces?.regions) wanted.regions = faces.regions;
     if (sidecar) {
       const outcome = await writeSidecar(exiftool, sidecar, wanted, { dryRun });
