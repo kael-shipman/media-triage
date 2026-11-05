@@ -169,6 +169,8 @@ export async function reconcile(ctx: ReconcileContext, units: readonly string[])
   const restore = new Map<OpenAccount, Set<string>>();
   const add = (map: Map<OpenAccount, Set<string>>, account: OpenAccount, id: string) => map.set(account, (map.get(account) ?? new Set()).add(id));
   const asked = new Map<string, { fields: XmpFields; updatedAt: string }>();
+  // Copies never looked at again since they were asked would otherwise be kept for good.
+  for (const [id, { at }] of ctx.refreshing) if (Date.now() - at >= CATCH_UP_MS) ctx.refreshing.delete(id);
 
   for (const unit of units) {
     try {
