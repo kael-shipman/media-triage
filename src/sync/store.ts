@@ -86,6 +86,8 @@ export interface UnitRecord {
   synced: SyncedValues;
   /** When the record was written (ISO 8601). */
   updated: string;
+  /** When the daemon saw the media file gone (ISO 8601), if it's gone (F11). */
+  gone?: string;
 }
 
 interface AssetRow {
@@ -107,6 +109,7 @@ interface UnitRow {
   sidecar_ino: number | null;
   synced: string;
   updated: string;
+  gone: string | null;
 }
 
 interface FaceRow {
@@ -149,7 +152,13 @@ function toUnit(row: UnitRow): UnitRecord {
     row.sidecar_size === null || row.sidecar_mtime === null || row.sidecar_ino === null
       ? undefined
       : { size: row.sidecar_size, mtimeMs: row.sidecar_mtime, ino: row.sidecar_ino };
-  return { path: row.path, ...(sidecar ? { sidecar } : {}), synced: JSON.parse(row.synced) as SyncedValues, updated: row.updated };
+  return {
+    path: row.path,
+    ...(sidecar ? { sidecar } : {}),
+    synced: JSON.parse(row.synced) as SyncedValues,
+    updated: row.updated,
+    ...(row.gone !== null ? { gone: row.gone } : {}),
+  };
 }
 
 export class SyncStore {
@@ -341,15 +350,39 @@ export class SyncStore {
 
   putUnits(records: readonly UnitRecord[]): void {
     const insert = this.db.query(
-      `insert into units (path, sidecar_size, sidecar_mtime, sidecar_ino, synced, updated) values (?, ?, ?, ?, ?, ?)
+      `insert into units (path, sidecar_size, sidecar_mtime, sidecar_ino, synced, updated, gone) values (?, ?, ?, ?, ?, ?, ?)
        on conflict (path) do update set sidecar_size = excluded.sidecar_size, sidecar_mtime = excluded.sidecar_mtime,
-         sidecar_ino = excluded.sidecar_ino, synced = excluded.synced, updated = excluded.updated`,
+         sidecar_ino = excluded.sidecar_ino, synced = excluded.synced, updated = excluded.updated, gone = excluded.gone`,
     );
     this.db.transaction(() => {
       for (const record of records) {
-        insert.run(record.path, record.sidecar?.size ?? null, record.sidecar?.mtimeMs ?? null, record.sidecar?.ino ?? null, JSON.stringify(record.synced), record.updated);
+        insert.run(
+          record.path,
+          record.sidecar?.size ?? null,
+          record.sidecar?.mtimeMs ?? null,
+          record.sidecar?.ino ?? null,
+          JSON.stringify(record.synced),
+          record.updated,
+          record.gone ?? null,
+        );
       }
     })();
+  }
+
+  /** Notes that a unit's media file is gone, unless it was noted already (F11). */
+  markGone(path: string, at: string): void {
+    this.db.query("update units set gone = ? where path = ? and gone is null").run(at, path);
+  }
+
+  /** The units in a folder whose file name is `<stem>.<ext>`: the media files a `<stem>.xmp` sidecar can belong to. */
+  unitsWithStem(folder: string, stem: string): string[] {
+    const prefix = `${folder}/${stem}.`;
+    const like = `${prefix.replace(/[\\%_]/g, (char) => `\\${char}`)}%`;
+    return this.db
+      .query<{ path: string }, [string]>("select path from units where path like ? escape '\\'")
+      .all(like)
+      .map((row) => row.path)
+      .filter((path) => path.startsWith(prefix) && !/[./]/.test(path.slice(prefix.length)));
   }
 
   removeUnit(path: string): void {

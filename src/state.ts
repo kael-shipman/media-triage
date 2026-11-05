@@ -78,6 +78,9 @@ const MIGRATIONS: readonly string[] = [
     stale integer not null default 0,
     primary key (account, id)
   ) strict`,
+  // 5: orphan sidecars (F11): when the daemon saw a unit's media file gone, so its sidecar can be deleted once the
+  // grace period is over.
+  `alter table units add column gone text`,
 ];
 
 /** The daemon's SQLite database, in the state folder. */

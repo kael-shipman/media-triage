@@ -8,13 +8,13 @@ you're about to build would change it, ask the author first.
 session stops partway. Each step ends with tests passing, the type check clean, a commit and a push; CI must stay
 green.
 
-**Last updated:** 2026-11-04. Milestones 1–6 of 8 are done. **Milestone 7** (F9–F11) is under way: F9, a race fix and
-F10 are done; **next is step 4, F11**, below.
+**Last updated:** 2026-11-04. Milestones 1–7 of 8 are done. **Next: milestone 8, filing** (DESIGN.md section 7),
+below.
 
 ## Working on it
 
 - **Bun 1.4** runs and builds it. Without Bun installed, `npx --yes bun@1.4.4` stands in for `bun`:
-  - `bun test`: the unit tests (364; 362 in CI, which skips the two that need Darktable), and the integration tests,
+  - `bun test`: the unit tests (367; 365 in CI, which skips the two that need Darktable), and the integration tests,
     skipped;
   - `bun run typecheck`: TypeScript, over `src/`, `scripts/` and `test/`;
   - `bun run build [version]`: executables for linux-x64 and linux-arm64 in `dist/` (`TARGETS=linux-x64` for one).
@@ -22,7 +22,7 @@ F10 are done; **next is step 4, F11**, below.
   `127.0.0.1:2284`, with made-up users (`alex@example.com`, the admin, and `sam@example.com`).
   - `bun run immich up` starts it (about a minute) and `bun run immich down` deletes everything. Leave it down when
     you stop: its database is in memory anyway.
-  - `MEDIA_TRIAGE_IMMICH_TESTS=1 bun test` runs everything against it (411 tests). Run it twice in a row on one
+  - `MEDIA_TRIAGE_IMMICH_TESTS=1 bun test` runs everything against it (414 tests). Run it twice in a row on one
     instance before calling a step done: tests must not depend on what other tests left behind.
   - Shared test helpers are in `test/immich/harness.ts`: `describeImmich`, `mediaFolder`, `photos`,
     `indexedLibrary`, `newUser` (fresh users, for anything that changes an account for good, such as joining a
@@ -56,9 +56,10 @@ F10 are done; **next is step 4, F11**, below.
 | Sync: state (`SyncStore`), covered folders, the watcher, the full pass, each account's stream, the reconcile, the daemon's jobs | `src/sync/` | 6 |
 | Per-account state (F9): favorites, visibility and albums, from each copy and the stream's albums | `src/sync/reconcile.ts` (`accountStates`), `store.ts`, `stream.ts` | 7 |
 | Named faces (F10): faces and people from the streams, `People/<name>` tags and regions | `src/core/faces.ts`, `src/sync/reconcile.ts` (`namedFaces`), `store.ts`, `stream.ts` | 7 |
+| Orphan sidecars (F11): found by the full pass, deleted once seen gone for the grace period | `src/sync/orphans.ts`, `full-pass.ts` | 7 |
 
-**The daemon's jobs:** account upkeep and the check, the full pass and sync (F1–F10 without F5), and the upgrade check.
-Nothing files yet, and orphan sidecars aren't handled yet.
+**The daemon's jobs:** account upkeep and the check, the full pass (with orphan sidecars, F11) and sync (F1–F10
+without F5), and the upgrade check. Nothing files yet.
 
 **Found in Immich 3.3.5 while building milestones 3 and 4** (each is in DESIGN.md, and each has a test):
 - the sync stream refuses `AssetsV1` (use `AssetsV2`), carries no paths, and `AssetFacesV3` covers the whole cluster
@@ -103,10 +104,23 @@ These shape milestone 6; DESIGN.md has each.
   paths) plus the inbox's sources, not everything under `paths.archive`, which is only where filing puts files.
 - **The check moves out of upkeep** when sync is built (milestone 6, step 1 below).
 
-## Next: milestone 7, F9–F11
+## Next: milestone 8, filing
 
-DESIGN.md section 6. The reconcile (`src/sync/reconcile.ts`) is where each goes. The stream acknowledges people and
-faces' events without acting on them yet (`src/sync/stream.ts`, `assetOf`).
+DESIGN.md section 7 (`Promote`), and its "Putting back what Immich keeps per asset". Not planned in steps yet: read
+section 7 first, then write the steps here. What milestone 7 gives it:
+- each sidecar's `mediatriage:Accounts` (F9): favorites, visibility and albums to put back on the new copies;
+- the state's faces, deleted ones included (`SyncStore.facesOn`), for matching the old copy's faces to the new one's;
+- the reconcile's catching-up rule (`ReconcileContext.refreshing`), which filing's settle check should respect.
+
+One question for the author before building: filing moves a unit, so the new copies appear with default favorites,
+visibility and albums, and the next reconcile would record those defaults over the sidecar's `Accounts` before
+filing has put them back. Filing has to hold the unit (or carry its record to the new path) until it has.
+
+Also worth doing before the first live run: a smoke test of the daemon with orphans and faces, as milestone 6's.
+
+## Milestone 7, F9–F11 (done 2026-11-04)
+
+DESIGN.md section 6.
 1. [x] **F9, per-account state** (done 2026-11-04): migration 3 (`assets.favorite`; `albums` and `album_assets`, per
    account, since an `AlbumDeleteV1` means the account lost the album); the stream records them and reconciles every
    unit in an album that's renamed or lost (`recordAlbums`); the reconcile writes `wanted.accounts` from
@@ -129,8 +143,10 @@ faces' events without acting on them yet (`src/sync/stream.ts`, `assetOf`).
    there is hand made and stays; other tools' regions stay. Tested end to end with a face added by hand, a rename and
    a deleted face (`reconcile.test.ts`, F10). Not covered: Immich's recognition (the development Immich has no machine
    learning).
-4. **F11, orphan sidecars:** `src/core/orphans.ts` has the rules; the full pass sees media go. Seen, then gone for the
-   grace period (1 h): delete; never seen: report; conflict copies: report.
+4. [x] **F11, orphan sidecars** (done 2026-11-04): migration 5 (`units.gone`); the reconcile notes a missing media
+   file as gone and does nothing else; the full pass lists orphans and conflict copies as it lists files;
+   `handleOrphans` reports never-seen ones, notes seen ones gone, and deletes those gone for `timing.orphan_grace`
+   (after listing the folder again), forgetting their records. Tested in `watch.test.ts`.
 5. **Not done in milestone 6, worth doing:** removing GPS or a date when a side drops one (now ignored, so nothing is
    lost); a test that the daemon's watcher-to-reconcile path works without the development Immich (the smoke test in
    step 7 below was by hand).

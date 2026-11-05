@@ -12,6 +12,7 @@ import type { State } from "../state.ts";
 import { openAccounts } from "../upkeep/accounts.ts";
 import { type Covered, coveredFolders, watchAllowance, watchWarning } from "./covered.ts";
 import { fullPass } from "./full-pass.ts";
+import { handleOrphans } from "./orphans.ts";
 import { type Refreshing, reconcile } from "./reconcile.ts";
 import { SyncStore } from "./store.ts";
 import { consumeStream, learnAllAssets } from "./stream.ts";
@@ -71,11 +72,28 @@ export class Sync {
     return sync;
   }
 
-  /** The full pass: marks every unit whose sidecar changed since its record, or that has none. */
+  /**
+   * The full pass: marks every unit whose sidecar changed since its record, or that has none, and deletes orphan
+   * sidecars whose media file has been gone for the grace period (F11).
+   */
   async fullPass(): Promise<void> {
     const result = await fullPass(this.store, this.covered.folders);
     for (const unit of result.changed) this.dirty.add(unit);
-    log.info("full pass", { media: result.media, changed: result.changed.length });
+    const { dryRun } = this.options;
+    const orphans = handleOrphans(this.store, result.orphans, { graceMs: this.config.timing.orphanGraceMs, now: Date.now(), dryRun });
+    for (const sidecar of orphans.deleted) log.info(dryRun ? "would delete an orphan sidecar" : "deleted an orphan sidecar: its media file is gone", { sidecar });
+    log.info("full pass", {
+      media: result.media,
+      changed: result.changed.length,
+      orphans: result.orphans.length || undefined,
+      deleted: orphans.deleted.length || undefined,
+    });
+    if (orphans.unknown.length > 0) {
+      log.warn("sidecars whose media file was never seen here: left as they are", { count: orphans.unknown.length, first: orphans.unknown.slice(0, 5).join(", ") });
+    }
+    if (result.conflicts.length > 0) {
+      log.warn("Syncthing conflict copies of sidecars: merge or delete them by hand", { count: result.conflicts.length, first: result.conflicts.slice(0, 5).join(", ") });
+    }
   }
 
   /** The sync job: each account's stream, then the dirty units. */

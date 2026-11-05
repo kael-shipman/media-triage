@@ -60,6 +60,22 @@ test("each account's state from its copies: read, locked, or kept from the sidec
   expect(accountStates(store, [record("t1", "two")], new Map(), [stale])).toEqual([stale]);
 });
 
+test("a unit whose media file is gone is only noted as gone, for its orphan sidecar (F11)", async () => {
+  const store = new SyncStore(state.db);
+  const config = configFor(join(dir, "state"), []);
+  const ctx = { config, store, exiftool, accounts: new Map(), dryRun: false, refreshing: new Map<string, Refreshing>() };
+  const unit = join(dir, "gone.jpg");
+  copyFileSync(join(FIXTURES, "darktable.xmp"), `${unit}.xmp`);
+  const synced = { rating: 3, title: null, description: null, creator: null, tags: [], date: null, gps: null, trashed: false };
+  store.putUnits([{ path: unit, synced, updated: "2026-11-04T00:00:00.000Z" }]);
+  await reconcile({ ...ctx, dryRun: true }, [unit]);
+  expect(store.unit(unit)?.gone).toBeUndefined();
+  const report = await reconcile(ctx, [unit]);
+  expect(report).toMatchObject({ written: [], refreshed: 0, waiting: [] });
+  expect(store.unit(unit)?.gone).toBeDefined();
+  expect(store.unit(unit)?.synced).toEqual(synced);
+});
+
 /** Two fresh accounts, each with a library over one folder holding a photo and the sidecar Darktable wrote. */
 async function twoAccounts(prefix: string) {
   const admin = await login(USERS.alex);

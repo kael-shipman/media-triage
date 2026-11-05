@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseConfig } from "../config.ts";
@@ -7,6 +7,7 @@ import { State } from "../state.ts";
 import { stampOf } from "../sidecars/sidecar.ts";
 import { coveredFolders, unitOf, watchWarning } from "./covered.ts";
 import { fullPass } from "./full-pass.ts";
+import { handleOrphans } from "./orphans.ts";
 import { SyncStore } from "./store.ts";
 import { DirtyUnits, Watcher } from "./watcher.ts";
 
@@ -111,11 +112,63 @@ test("the full pass returns units without a record, or whose sidecar changed", a
     { path: join(root, "x", "b.jpg"), synced, updated },
     { path: join(root, "x", "c.mp4"), sidecar: stampOf(join(root, "x", "c.mp4.xmp")), synced, updated },
   ]);
-  expect(await fullPass(store, [root])).toEqual({ media: 3, changed: [] });
+  expect(await fullPass(store, [root])).toEqual({ media: 3, changed: [], orphans: [], conflicts: [] });
 
   touch(join(root, "x", "a.jpg.xmp"), "changed");
   touch(join(root, "x", "b.jpg.xmp"));
   touch(join(root, "x", "new.heic"));
-  expect(await fullPass(store, [root])).toEqual({ media: 4, changed: [join(root, "x", "a.jpg"), join(root, "x", "b.jpg"), join(root, "x", "new.heic")] });
+  expect(await fullPass(store, [root])).toEqual({
+    media: 4,
+    changed: [join(root, "x", "a.jpg"), join(root, "x", "b.jpg"), join(root, "x", "new.heic")],
+    orphans: [],
+    conflicts: [],
+  });
+  state.close();
+});
+
+test("orphan sidecars: never seen is reported, seen and gone waits out the grace period, then it's deleted (F11)", async () => {
+  const state = State.open(join(dir, "state"));
+  const store = new SyncStore(state.db);
+  const folder = join(dir, "media", "x");
+  const at = (name: string) => join(folder, name);
+  const synced = { rating: null, title: null, description: null, creator: null, tags: [], date: null, gps: null, trashed: false };
+  const updated = "2026-11-04T00:00:00.000Z";
+  // Seen: gone.jpg (with a duplicate's sidecar too) and clip.mp4 (a "<stem>.xmp"); never seen: early.mov's; kept:
+  // the sidecar of a file that's there; reported: a conflict copy.
+  for (const name of ["gone.jpg.xmp", "gone_01.jpg.xmp", "clip.xmp", "early.mov.xmp", "here.jpg", "here.jpg.xmp", "here.jpg.sync-conflict-20261104-101010-ABCDEFG.xmp"]) {
+    touch(at(name));
+  }
+  store.putUnits([at("gone.jpg"), at("clip.mp4"), at("here.jpg")].map((path) => ({ path, synced, updated })));
+  const pass = await fullPass(store, [join(dir, "media")]);
+  expect(pass.orphans).toEqual([at("clip.xmp"), at("early.mov.xmp"), at("gone.jpg.xmp"), at("gone_01.jpg.xmp")]);
+  expect(pass.conflicts).toEqual([at("here.jpg.sync-conflict-20261104-101010-ABCDEFG.xmp")]);
+
+  const hour = 60 * 60_000;
+  const now = Date.parse("2026-11-04T12:00:00.000Z");
+  const first = handleOrphans(store, pass.orphans, { graceMs: hour, now, dryRun: false });
+  expect(first).toEqual({ deleted: [], waiting: [at("clip.xmp"), at("gone.jpg.xmp"), at("gone_01.jpg.xmp")], unknown: [at("early.mov.xmp")] });
+  expect(store.unit(at("gone.jpg"))?.gone).toBe("2026-11-04T12:00:00.000Z");
+
+  expect(handleOrphans(store, pass.orphans, { graceMs: hour, now: now + hour - 1, dryRun: false }).deleted).toEqual([]);
+  expect(handleOrphans(store, pass.orphans, { graceMs: hour, now: now + hour, dryRun: true }).deleted).toHaveLength(3);
+  expect(existsSync(at("gone.jpg.xmp"))).toBe(true);
+
+  const last = handleOrphans(store, pass.orphans, { graceMs: hour, now: now + hour, dryRun: false });
+  expect(last.deleted).toEqual([at("clip.xmp"), at("gone.jpg.xmp"), at("gone_01.jpg.xmp")]);
+  expect(last.unknown).toEqual([at("early.mov.xmp")]);
+  for (const name of ["clip.xmp", "gone.jpg.xmp", "gone_01.jpg.xmp"]) expect(existsSync(at(name))).toBe(false);
+  expect(existsSync(at("early.mov.xmp"))).toBe(true);
+  expect(store.unit(at("gone.jpg"))).toBeUndefined();
+  state.close();
+});
+
+test("a media file that's back is reconciled again, and isn't gone any more", async () => {
+  const state = State.open(join(dir, "state"));
+  const store = new SyncStore(state.db);
+  const path = join(dir, "media", "back.jpg");
+  touch(path);
+  const synced = { rating: null, title: null, description: null, creator: null, tags: [], date: null, gps: null, trashed: false };
+  store.putUnits([{ path, synced, updated: "2026-11-04T00:00:00.000Z", gone: "2026-11-04T01:00:00.000Z" }]);
+  expect((await fullPass(store, [join(dir, "media")])).changed).toEqual([path]);
   state.close();
 });

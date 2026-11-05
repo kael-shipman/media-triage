@@ -176,8 +176,8 @@ If the state is lost, merge as a union, which never drops a tag, and report it.
   now (an edit in Immich rewrites the sidecar), or once its `updatedAt` changed at least 2 seconds earlier (metadata
   extraction updates the asset; its tags are replaced in a parallel step). After an hour it counts again, with a
   warning. This is kept in memory: a restart forgets it.
-- **Not yet:** removing GPS or a date (a side that drops one isn't acted on, so nothing is lost), and orphans
-  (milestone 7).
+- **Not yet:** removing GPS or a date (a side that drops one isn't acted on, so nothing is lost).
+- **A unit whose media file is gone** isn't reconciled: its record notes when it was seen gone (F11).
 - **In the daemon** (`src/sync/job.ts`): the full pass at start and daily; the `sync` job each minute and after every
   change the watcher sees, reading each account's stream (a batch is reconciled before it's acknowledged), then up to
   200 units that have been quiet for 2 seconds, so a first run over the whole archive doesn't hold up other jobs.
@@ -334,6 +334,16 @@ If the state is lost, merge as a union, which never drops a tag, and report it.
     this machine.
   - **Never seen:** orphans whose media file the daemon never saw are reported, not deleted.
   - **Conflict copies:** Syncthing conflict copies (`*.sync-conflict-*.xmp`) are reported, not deleted.
+
+  How it's built (`src/sync/orphans.ts`, `src/sync/full-pass.ts`):
+  - **Seen** means the unit has a record: the daemon reconciled its media file at least once.
+  - **Seeing it go:** the reconcile finds the media file missing (the watcher reports its deletion), or a full pass
+    finds its sidecar with no media file beside it. Either notes the time in the unit's record (`gone`), once. A media
+    file that comes back is reconciled again, which clears it.
+  - **Deleting:** each full pass (at start and daily) lists the orphans, and deletes those whose media file was seen
+    gone at least the grace period (`timing.orphan_grace`) earlier, after listing the folder again. The unit's record
+    goes with it. So a sidecar goes at the first full pass after the grace period, which can be a day later.
+  - **A dry run** reports what it would delete, and notes nothing.
 
 It writes only when a field actually has to change. Sidecars sync to every machine, and Darktable lists every changed
 sidecar when it starts.
@@ -654,3 +664,4 @@ with what changed, not with the size of the archive.
 - 2026-11-04: a copy catching up after a refresh isn't a side (section 5): found in testing, it undid a tag removed
   in Darktable.
 - 2026-11-04: F10 built: faces and people kept in the state from the streams, tags and regions from them.
+- 2026-11-04: F11 built: orphan sidecars deleted by the full pass, once seen gone for the grace period.

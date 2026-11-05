@@ -11,6 +11,7 @@
 // sidecar now (an edit in Immich rewrites the sidecar), or once its `updatedAt` changed a moment ago or more: Immich's
 // metadata extraction updates the asset, alongside its tags and EXIF (`metadata.service.ts`).
 
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { Config } from "../config.ts";
 import { type FacesOutcome, type NamedFace, applyFaces } from "../core/faces.ts";
@@ -258,6 +259,13 @@ async function reconcileUnit(
 ): Promise<void> {
   const { store, exiftool, dryRun } = ctx;
   const sidecarPath = `${unit}.xmp`;
+  const previous = store.unit(unit);
+
+  // F11: the media file is gone. If its sidecar was left behind, the full pass deletes it after the grace period.
+  if (!existsSync(unit)) {
+    if (previous && !dryRun) store.markGone(unit, new Date().toISOString());
+    return;
+  }
 
   // 1. Read: the sidecar (making F2's minimal one in an inbox source), each copy, and the last-synced record.
   let sidecar: Sidecar | undefined = await readSidecar(exiftool, sidecarPath);
@@ -281,7 +289,6 @@ async function reconcileUnit(
     if (asset) copies.push({ record, account, asset });
   }
 
-  const previous = store.unit(unit);
   const base: Base | undefined = previous?.synced;
   const catchingUp = new Set(copies.filter((copy) => isCatchingUp(ctx.refreshing, copy, fields)).map((copy) => copy.asset.id));
   const sides: Side[] = copies.map((copy) => {
