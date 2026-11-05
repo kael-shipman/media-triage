@@ -7,9 +7,9 @@ someone with a similar setup, but it's built for mine. Expect rough edges, and r
 > self-upgrading, the installer and releases. So do the Immich client (`media-triage login <account>`), account
 > upkeep (libraries, the cluster group, shared people, and `media-triage check`), and reading and writing sidecars
 > (`media-triage sidecar FILE` shows what it reads), and sync: ratings, tags, titles, descriptions, capture times,
-> GPS and trash, between the sidecars, Darktable and every Immich copy. Per-account state, named faces, orphan sidecars
-> and filing aren't built yet. What's built and what's next:
-> [RESUME.md](RESUME.md).
+> GPS and trash, between the sidecars, Darktable and every Immich copy; each account's favorites, archiving and
+> albums, and named faces, recorded in the sidecars; and deleting orphan sidecars. Filing isn't built yet. What's built
+> and what's next: [RESUME.md](RESUME.md).
 
 ## What it's for
 
