@@ -3,6 +3,13 @@
 // the section's last step, is milestone 8.
 //
 // A dry run reads and merges, and reports what it would write, but writes, records and changes nothing.
+//
+// A copy asked to refresh is catching up until it has read the sidecar: until then, what it says of the sidecar's
+// values is an older sidecar's, not a change made in Immich, so it isn't a side for them. Otherwise the daemon's next
+// look at the unit, a moment after its own write, would read a tag it had just removed as one that copy added, and put
+// it back. It has caught up once it holds what it would read from the sidecar it was asked to read, or from the
+// sidecar now (an edit in Immich rewrites the sidecar), or once its `updatedAt` changed a moment ago or more: Immich's
+// metadata extraction updates the asset, alongside its tags and EXIF (`metadata.service.ts`).
 
 import { join } from "node:path";
 import type { Config } from "../config.ts";
@@ -24,7 +31,22 @@ export interface ReconcileContext {
   /** The open accounts, by configured name. */
   accounts: ReadonlyMap<string, OpenAccount>;
   dryRun: boolean;
+  /** Copies asked to refresh that may be catching up, by asset ID. Kept between runs. */
+  refreshing: Map<string, Refreshing>;
 }
+
+/** A copy asked to refresh: when (ms), its `updatedAt` then, and the sidecar's fields it was asked to read. */
+export interface Refreshing {
+  at: number;
+  updatedAt: string;
+  fields: XmpFields;
+}
+
+/** How long after an asset's update its metadata extraction is taken to be done: tags are replaced in a parallel step. */
+const EXTRACTED_MS = 2000;
+
+/** How long a copy may take to read its sidecar after a refresh before what it says counts again. */
+export const CATCH_UP_MS = 60 * 60_000;
 
 export interface ReconcileReport {
   units: number;
@@ -117,6 +139,23 @@ function copyInStep(asset: Asset, fields: XmpFields): boolean {
   );
 }
 
+/**
+ * Whether a copy asked to refresh hasn't read the sidecar yet (see the top of this file), within `CATCH_UP_MS`. A copy
+ * that caught up, or ran out of time, is forgotten.
+ */
+function isCatchingUp(refreshing: Map<string, Refreshing>, copy: Copy, fields: XmpFields | undefined): boolean {
+  const asked = refreshing.get(copy.asset.id);
+  if (asked === undefined) return false;
+  const extracted = copy.asset.updatedAt !== asked.updatedAt && Date.now() - Date.parse(copy.asset.updatedAt) >= EXTRACTED_MS;
+  const caughtUp = extracted || copyInStep(copy.asset, asked.fields) || (fields !== undefined && copyInStep(copy.asset, fields));
+  if (!caughtUp) {
+    if (Date.now() - asked.at < CATCH_UP_MS) return true;
+    log.warn("a copy still hasn't read its sidecar, an hour after it was asked to; what it says counts again", { asset: copy.asset.id, account: copy.record.account });
+  }
+  refreshing.delete(copy.asset.id);
+  return false;
+}
+
 /** The inbox source a unit is in, if it's in one. */
 function sourceOf(config: Config, unit: string): { creator: string } | undefined {
   if (!config.paths.inbox) return undefined;
@@ -129,11 +168,15 @@ export async function reconcile(ctx: ReconcileContext, units: readonly string[])
   const trash = new Map<OpenAccount, Set<string>>();
   const restore = new Map<OpenAccount, Set<string>>();
   const add = (map: Map<OpenAccount, Set<string>>, account: OpenAccount, id: string) => map.set(account, (map.get(account) ?? new Set()).add(id));
+  const asked = new Map<string, { fields: XmpFields; updatedAt: string }>();
 
   for (const unit of units) {
     try {
       await reconcileUnit(ctx, unit, report, {
-        refresh: (copy) => add(refresh, copy.account, copy.asset.id),
+        refresh: (copy, fields) => {
+          add(refresh, copy.account, copy.asset.id);
+          asked.set(copy.asset.id, { fields, updatedAt: copy.asset.updatedAt });
+        },
         trash: (copy) => add(trash, copy.account, copy.asset.id),
         restore: (copy) => add(restore, copy.account, copy.asset.id),
       });
@@ -153,7 +196,10 @@ export async function reconcile(ctx: ReconcileContext, units: readonly string[])
   }
   for (const [account, ids] of refresh) {
     report.refreshed += ids.size;
-    if (!ctx.dryRun) await refreshMetadata(account.client, [...ids]);
+    if (ctx.dryRun) continue;
+    await refreshMetadata(account.client, [...ids]);
+    const now = Date.now();
+    for (const id of ids) ctx.refreshing.set(id, { at: now, ...asked.get(id)! });
   }
 
   if (report.written.length + report.created.length + report.refreshed + report.trashed.length + report.restored.length + report.conflicts.length > 0) {
@@ -183,7 +229,7 @@ async function reconcileUnit(
   ctx: ReconcileContext,
   unit: string,
   report: ReconcileReport,
-  tell: { refresh: (copy: Copy) => void; trash: (copy: Copy) => void; restore: (copy: Copy) => void },
+  tell: { refresh: (copy: Copy, fields: XmpFields) => void; trash: (copy: Copy) => void; restore: (copy: Copy) => void },
 ): Promise<void> {
   const { store, exiftool, dryRun } = ctx;
   const sidecarPath = `${unit}.xmp`;
@@ -212,7 +258,12 @@ async function reconcileUnit(
 
   const previous = store.unit(unit);
   const base: Base | undefined = previous?.synced;
-  const sides: Side[] = copies.map((copy) => ({ name: `${copy.record.account}:${copy.asset.id}`, at: Date.parse(copy.asset.updatedAt), values: copyValues(copy.asset) }));
+  const catchingUp = new Set(copies.filter((copy) => isCatchingUp(ctx.refreshing, copy, fields)).map((copy) => copy.asset.id));
+  const sides: Side[] = copies.map((copy) => {
+    const values = copyValues(copy.asset);
+    // A copy catching up still says whether it's in the trash: that's not from the sidecar.
+    return { name: `${copy.record.account}:${copy.asset.id}`, at: Date.parse(copy.asset.updatedAt), values: catchingUp.has(copy.asset.id) ? { trashed: values.trashed, offline: values.offline } : values };
+  });
   if (fields) sides.unshift({ name: "darktable", at: sidecar?.stamp.mtimeMs ?? 0, values: darktableValues(fields) });
   if (sides.length === 0) return;
 
@@ -248,14 +299,14 @@ async function reconcileUnit(
         stamp = outcome.stamp;
         fields = (await readSidecar(exiftool, sidecarPath))?.fields ?? fields;
         // 4. Tell Immich: every copy reads the changed sidecar again (F1).
-        for (const copy of copies) tell.refresh(copy);
+        for (const copy of copies) tell.refresh(copy, fields);
       }
     }
   }
 
   // 4. Tell Immich: copies that don't hold what they'd read from the sidecar read it again, and trash follows (F8).
   for (const copy of copies) {
-    if (fields && !copyInStep(copy.asset, fields)) tell.refresh(copy);
+    if (fields && !catchingUp.has(copy.asset.id) && !copyInStep(copy.asset, fields)) tell.refresh(copy, fields);
     if (copy.asset.isOffline) continue;
     if (merged.trashed && !copy.asset.isTrashed) tell.trash(copy);
     if (!merged.trashed && copy.asset.isTrashed) tell.restore(copy);

@@ -122,7 +122,9 @@ describe("writing", () => {
   test("a file that changed since it was read is left alone", async () => {
     const path = copyOf("darktable");
     const sidecar = (await readSidecar(exiftool, path))!;
-    writeFileSync(path, readFileSync(path, "utf8").replace('xmp:Rating="3"', 'xmp:Rating="1"'));
+    // A change of size: the kernel updates mtimes only at its clock's tick (a few ms), so an edit in place of the same
+    // size made that soon after the read can have the same stamp.
+    writeFileSync(path, readFileSync(path, "utf8").replace('xmp:Rating="3"', 'xmp:Rating="1" '));
     const before = readFileSync(path, "utf8");
     expect((await writeSidecar(exiftool, sidecar, { rating: 5 })).status).toBe("changed-meanwhile");
     expect(readFileSync(path, "utf8")).toBe(before);

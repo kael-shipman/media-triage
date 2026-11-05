@@ -168,6 +168,14 @@ If the state is lost, merge as a union, which never drops a tag, and report it.
 - **Telling Immich:** when the sidecar is written, every copy is refreshed; otherwise only copies that don't hold what
   they'd read from the sidecar (`immichReads`), such as another account's copy after an edit in Immich. Refreshes,
   trashes and restores are batched per account.
+- **A copy catching up isn't a side.** Until a copy asked to refresh has read the sidecar, what it says of the
+  sidecar's values is an older sidecar's. Counted as a side, it would undo the change it was asked to read: the daemon
+  looks at the unit again a moment after its own write (the watcher sees it), and a tag just removed, still on the
+  copy, would read as one the copy added (found in testing, 2026-11-04). So until it catches up, only its trash
+  counts. It has caught up once it holds what it would read from the sidecar it was asked to read, or from the sidecar
+  now (an edit in Immich rewrites the sidecar), or once its `updatedAt` changed at least 2 seconds earlier (metadata
+  extraction updates the asset; its tags are replaced in a parallel step). After an hour it counts again, with a
+  warning. This is kept in memory: a restart forgets it.
 - **Not yet:** removing GPS or a date (a side that drops one isn't acted on, so nothing is lost), and named faces and
   orphans (milestone 7).
 - **In the daemon** (`src/sync/job.ts`): the full pass at start and daily; the `sync` job each minute and after every
@@ -627,5 +635,7 @@ with what changed, not with the size of the archive.
   (F6), Darktable dropping the date's offset (F6), Immich showing Darktable's own tags (F4), and how regions'
   coordinates relate to Immich's faces (F10). Checked that Immich and Darktable keep the namespace and regions (F9,
   F10). F9's namespace and its key settled. The author decided F5 isn't needed.
+- 2026-11-04: a copy catching up after a refresh isn't a side (section 5): found in testing, it undid a tag removed
+  in Darktable.
 - 2026-11-04: F9 built: each account's state, from its copies and its stream's albums; a reset keeps what the stream
   reported, stale, until it's sent again. Assets are recorded with their owner's account only.

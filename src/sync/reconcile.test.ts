@@ -11,7 +11,7 @@ import { Exiftool } from "../sidecars/exiftool.ts";
 import { readSidecar, writeSidecar } from "../sidecars/sidecar.ts";
 import { State } from "../state.ts";
 import { openAccounts } from "../upkeep/accounts.ts";
-import { accountStates, reconcile } from "./reconcile.ts";
+import { type Refreshing, accountStates, reconcile } from "./reconcile.ts";
 import { SyncStore } from "./store.ts";
 import { consumeStream, learnAllAssets } from "./stream.ts";
 
@@ -90,7 +90,7 @@ async function twoAccounts(prefix: string) {
     for (const account of accounts) await learnAllAssets(account, store, map);
     return store.assetsAt(unit).length === 2 ? true : undefined;
   });
-  const ctx = { config, store, exiftool, accounts: byName, dryRun: false };
+  const ctx = { config, store, exiftool, accounts: byName, dryRun: false, refreshing: new Map<string, Refreshing>() };
   const copy = (name: string) => store.assetsAt(unit).find((record) => record.account === name)!;
   const read = (name: string) => getAsset(byName.get(name)!.client, copy(name).id) as Promise<Asset>;
   const settled = (what: string, check: (one: Asset, two: Asset) => boolean) =>
@@ -183,5 +183,22 @@ describeImmich("reconciling a unit with two accounts' copies", () => {
     await sync();
     expect(await entries()).toBeUndefined();
     expect(store.albumsOf(copy("one").id)).toEqual([]);
+  }, 180_000);
+
+  test("a tag removed in Darktable stays removed when the unit is reconciled again before Immich re-reads the sidecar", async () => {
+    const { unit, ctx, settled } = await twoAccounts("race");
+    const tagsOf = (asset: Asset) => (asset.tags ?? []).map((tag) => tag.value).sort();
+    await reconcile(ctx, [unit]);
+    await settled("the first run's tags", (a, b) => tagsOf(a).includes("Title/Lake day") && tagsOf(b).includes("Title/Lake day"));
+
+    const sidecar = (await readSidecar(exiftool, `${unit}.xmp`))!;
+    await writeSidecar(exiftool, sidecar, { tags: ["People/Robin Example"] });
+    await reconcile(ctx, [unit]);
+    // The watcher would see the daemon's own write and reconcile the unit again, a moment later.
+    await reconcile(ctx, [unit]);
+    expect((await readSidecar(exiftool, `${unit}.xmp`))!.fields.hierarchicalSubject).not.toContain("Places|Lake");
+    await settled("the tag gone from both copies", (a, b) => !tagsOf(a).includes("Places/Lake") && !tagsOf(b).includes("Places/Lake"));
+    await reconcile(ctx, [unit]);
+    expect((await readSidecar(exiftool, `${unit}.xmp`))!.fields.hierarchicalSubject).not.toContain("Places|Lake");
   }, 180_000);
 });

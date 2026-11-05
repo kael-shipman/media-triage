@@ -8,8 +8,8 @@ you're about to build would change it, ask the author first.
 session stops partway. Each step ends with tests passing, the type check clean, a commit and a push; CI must stay
 green.
 
-**Last updated:** 2026-11-04. Milestones 1–6 of 8 are done. **Milestone 7** (F9–F11) is under way: F9 is done;
-**next is step 2** (a race to check), then F10, below.
+**Last updated:** 2026-11-04. Milestones 1–6 of 8 are done. **Milestone 7** (F9–F11) is under way: F9 and a race fix
+are done; **next is step 3, F10**, below.
 
 ## Working on it
 
@@ -114,12 +114,11 @@ faces' events without acting on them yet (`src/sync/stream.ts`, `assetOf`).
    what's still stale once the stream completes. Also fixed: assets are learned only from the account's own asset
    events and only if it owns them (an album event could name another user's asset, which was then recorded under
    the wrong account). Tested end to end (`reconcile.test.ts`, F9).
-2. **Next: check a possible race in milestone 6, before F10.** After the daemon writes a sidecar and asks Immich to
-   refresh, the watcher sees the write and the unit is reconciled again about 2 s later. If a copy hasn't re-read the
-   sidecar by then, it still holds the old tags, and the tag-by-tag merge reads a tag the daemon just removed as one
-   that copy added, and puts it back. Test it with the development Immich (remove a tag in Darktable, reconcile, then
-   reconcile again at once). If it's real, one fix: remember when each copy was asked to refresh, and leave out a
-   copy as a side until its `updatedAt` is later than that (check that a refresh bumps `updatedAt`).
+2. [x] **A race in milestone 6, fixed** (2026-11-04): right after the daemon wrote a sidecar, the watcher's next
+   reconcile read a copy that hadn't re-read it yet, and put back a tag just removed in Darktable (confirmed with the
+   development Immich). Now a copy asked to refresh isn't a side for the sidecar's values until it catches up
+   (`isCatchingUp` in `src/sync/reconcile.ts`, DESIGN.md section 5; `ReconcileContext.refreshing`, held by the `Sync`
+   job). Test: "a tag removed in Darktable stays removed…" in `reconcile.test.ts`.
 3. **F10, named faces:** `AssetFaceV3` (faces on every asset in the cluster group; `personId` is the person group's)
    and `PersonV1` (each account's own records, with its own name and `isHidden`) into `People|<name>` tags and regions
    (`regionFromFace`, with `exifInfo.orientation`). Plan, from Immich 3.3.5's source (`sync.repository.ts`,
@@ -224,6 +223,13 @@ first live write (DESIGN.md section 9).
 - **Immich lowercases emails;** `newUser` makes lowercase ones.
 - **The development Immich is shared by every test file:** other tests' libraries and people are there too. Filter
   by your own IDs, and use fresh users for anything that changes an account for good.
+- **Flaky once, not reproduced** (2026-11-04): `stream.test.ts`, "a rating and a trash come through as their unit"
+  (passed 6 times in a row after). If it recurs, print what `units` held. One possible cause, from Immich's source: a
+  stream row's `updateId` is set when the row is updated (`updated_at` trigger), not when its transaction commits, so a
+  row committed after a later one of the same type was acknowledged is never sent (`upsertQuery`). That would affect
+  Immich's phone apps too.
+- **mtime ticks:** the kernel updates mtimes at its clock's tick (a few ms), so a test that edits a sidecar in place,
+  keeping its size, right after reading it can leave the stamp unchanged. Change the size.
 - **Immich's background jobs run after API calls return** (thumbnails, a person's face): wait for them (`waitFor`)
   before asserting there's nothing new.
 

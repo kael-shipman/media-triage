@@ -12,7 +12,7 @@ import type { State } from "../state.ts";
 import { openAccounts } from "../upkeep/accounts.ts";
 import { type Covered, coveredFolders, watchAllowance, watchWarning } from "./covered.ts";
 import { fullPass } from "./full-pass.ts";
-import { reconcile } from "./reconcile.ts";
+import { type Refreshing, reconcile } from "./reconcile.ts";
 import { SyncStore } from "./store.ts";
 import { consumeStream, learnAllAssets } from "./stream.ts";
 import { DirtyUnits, Watcher } from "./watcher.ts";
@@ -36,6 +36,8 @@ export class Sync {
   private watcher: Watcher | undefined;
   /** A dry run reads the streams once, since it acknowledges nothing and would read them whole each time. */
   private streamed = false;
+  /** Copies catching up after a refresh (src/sync/reconcile.ts). */
+  private readonly refreshing = new Map<string, Refreshing>();
 
   private constructor(
     private readonly config: Config,
@@ -80,7 +82,7 @@ export class Sync {
   async run(): Promise<RunResult | void> {
     const accounts = await openAccounts(this.config);
     for (const { account, problem } of accounts.problems) log.warn("account left out of sync", { account: account.name, problem });
-    const ctx = { config: this.config, store: this.store, exiftool: this.exiftool, accounts: new Map(accounts.open.map((open) => [open.account.name, open])), dryRun: this.options.dryRun };
+    const ctx = { config: this.config, store: this.store, exiftool: this.exiftool, accounts: new Map(accounts.open.map((open) => [open.account.name, open])), dryRun: this.options.dryRun, refreshing: this.refreshing };
 
     if (!(this.options.dryRun && this.streamed)) {
       for (const account of accounts.open) {
