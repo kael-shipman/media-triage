@@ -107,6 +107,9 @@ video. Units in the archive count as much as units in the inbox (section 1).
    albums and people, and the cluster group's faces) is kept, marked stale, until the stream sends it again; once the stream has been read whole, what's still
    stale is gone, and its units are reconciled. Emptying it at the reset would rewrite those sidecars twice.
 
+   **Late, never lost** (seen in testing, 2026-11-04): a change can reach the stream a moment after Immich's API call
+   returns. A stream read at once can miss it, and a read 2 seconds later has it. The daemon reads every minute.
+
    Tags have no sync type. A tag change reaches the daemon as Immich's own sidecar write (point 1), and the merge
    reads each copy's tags through the API.
 3. **Its own clock:** settle times, filing's retries, the full pass, upgrade checks.
@@ -175,7 +178,8 @@ If the state is lost, merge as a union, which never drops a tag, and report it.
   counts. It has caught up once it holds what it would read from the sidecar it was asked to read, or from the sidecar
   now (an edit in Immich rewrites the sidecar), or once its `updatedAt` changed at least 2 seconds earlier (metadata
   extraction updates the asset; its tags are replaced in a parallel step). After an hour it counts again, with a
-  warning. This is kept in memory: a restart forgets it.
+  warning. A copy catching up is asked again if the sidecar has changed since it was asked. This is kept in memory: a
+  restart forgets it.
 - **Not yet:** removing GPS or a date (a side that drops one isn't acted on, so nothing is lost).
 - **A unit whose media file is gone** isn't reconciled: its record notes when it was seen gone (F11).
 - **In the daemon** (`src/sync/job.ts`): the full pass at start and daily; the `sync` job each minute and after every
@@ -362,7 +366,13 @@ sidecar when it starts.
 - **The settle time is for Immich:** a sidecar write that Immich has queued but not yet done would otherwise land at
   the old path after the move.
 
-**Without a title,** the unit stays put and gets `Promote/Needs a title`, which is cleared once it's filed.
+**Without a title,** the unit stays put and gets `Promote/Needs a title`, which is cleared once it's filed, or once
+`Promote` is gone.
+
+**How readiness is judged** (`src/core/filing.ts`, `readiness`; the reconcile reports it): "rejected" is Darktable's
+reject (`xmp:Rating` -1); a copy agrees with the sidecar when it holds what it would read from it and isn't catching
+up (section 5); the unit last changed at the latest of the sidecar's mtime and the copies' `updatedAt`. A unit with a
+copy in an account whose session isn't open isn't filed: that copy's state can't be read.
 
 **Naming,** exactly as the author's Darktable "Archive RAW" export preset does
 (`$(EXIF_YEAR).$(EXIF_MONTH).$(EXIF_DAY) - $(TITLE)/$(EXIF_YEAR).$(EXIF_MONTH).$(EXIF_DAY)-$(EXIF_HOUR).$(EXIF_MINUTE).$(EXIF_SECOND) - $(CREATOR)`):

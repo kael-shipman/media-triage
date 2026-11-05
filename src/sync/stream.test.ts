@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { USERS, api, configFor, describeImmich, indexedLibrary, login, newUser } from "../../test/immich/harness.ts";
+import { USERS, api, configFor, describeImmich, indexedLibrary, login, newUser, waitFor } from "../../test/immich/harness.ts";
 import { PathMap } from "../core/path-map.ts";
 import { loginAccount } from "../immich/login.ts";
 import { State } from "../state.ts";
@@ -59,8 +59,13 @@ describeImmich("the sync stream, consumed", () => {
     const b = context.library.assets["b.jpg"]!.id;
     await api("PUT", `/assets/${a}`, { token: context.token, body: { rating: 3 } });
     await api("DELETE", "/assets", { token: context.token, body: { ids: [b], force: false } });
-    const next = await consume(context);
-    expect(next.units).toEqual([join(context.library.folder.local, "a.jpg"), join(context.library.folder.local, "b.jpg")]);
+    // A change can reach the stream a moment after the API call returns, so read until both have.
+    const units = new Set<string>();
+    await waitFor("both changes in the stream", async () => {
+      for (const unit of (await consume(context)).units) units.add(unit);
+      return units.size === 2 ? true : undefined;
+    });
+    expect([...units].sort()).toEqual([join(context.library.folder.local, "a.jpg"), join(context.library.folder.local, "b.jpg")]);
     expect(context.store.asset(b)?.trashed).toBe(true);
     expect(context.store.asset(a)?.trashed).toBe(false);
   });

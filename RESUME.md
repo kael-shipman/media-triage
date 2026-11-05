@@ -9,12 +9,12 @@ session stops partway. Each step ends with tests passing, the type check clean, 
 green.
 
 **Last updated:** 2026-11-04. Milestones 1–7 of 8 are done. **Milestone 8, filing** (DESIGN.md section 7) is
-planned below; **next is step 1**.
+planned below; step 1 is done, **next is step 2**.
 
 ## Working on it
 
 - **Bun 1.4** runs and builds it. Without Bun installed, `npx --yes bun@1.4.4` stands in for `bun`:
-  - `bun test`: the unit tests (367; 365 in CI, which skips the two that need Darktable), and the integration tests,
+  - `bun test`: the unit tests (377; 375 in CI, which skips the two that need Darktable), and the integration tests,
     skipped;
   - `bun run typecheck`: TypeScript, over `src/`, `scripts/` and `test/`;
   - `bun run build [version]`: executables for linux-x64 and linux-arm64 in `dist/` (`TARGETS=linux-x64` for one).
@@ -22,7 +22,7 @@ planned below; **next is step 1**.
   `127.0.0.1:2284`, with made-up users (`alex@example.com`, the admin, and `sam@example.com`).
   - `bun run immich up` starts it (about a minute) and `bun run immich down` deletes everything. Leave it down when
     you stop: its database is in memory anyway.
-  - `MEDIA_TRIAGE_IMMICH_TESTS=1 bun test` runs everything against it (414 tests). Run it twice in a row on one
+  - `MEDIA_TRIAGE_IMMICH_TESTS=1 bun test` runs everything against it (425 tests). Run it twice in a row on one
     instance before calling a step done: tests must not depend on what other tests left behind.
   - Shared test helpers are in `test/immich/harness.ts`: `describeImmich`, `mediaFolder`, `photos`,
     `indexedLibrary`, `newUser` (fresh users, for anything that changes an account for good, such as joining a
@@ -111,7 +111,8 @@ back, sync leaves it alone (DESIGN.md section 7, "Holding the unit"). What miles
 `mediatriage:Accounts` (F9); the state's faces, deleted ones included (`SyncStore.facesOn`); the reconcile's
 catching-up rule (`ReconcileContext.refreshing`).
 
-1. **Readiness and `Promote/Needs a title`:** the reconcile adds `Promote/Needs a title` to an inbox unit tagged
+1. [x] **Readiness and `Promote/Needs a title`** (done 2026-11-04; `ReconcileReport.ready` and `notReady`, with what
+   filing needs in `ReadyUnit`; a copy catching up is now asked again when the sidecar changed meanwhile): the reconcile adds `Promote/Needs a title` to an inbox unit tagged
    `Promote` without a title, and removes it otherwise; `readiness` (pure, `src/core/filing.ts`): `Promote` and a
    title, no copy trashed, not rejected (`xmp:Rating` -1), settled (every copy in step with the sidecar and not
    catching up, and nothing changed for `timing.settle`: the latest of the sidecar's mtime and the copies'
@@ -249,11 +250,10 @@ first live write (DESIGN.md section 9).
 - **Immich lowercases emails;** `newUser` makes lowercase ones.
 - **The development Immich is shared by every test file:** other tests' libraries and people are there too. Filter
   by your own IDs, and use fresh users for anything that changes an account for good.
-- **Flaky once, not reproduced** (2026-11-04): `stream.test.ts`, "a rating and a trash come through as their unit"
-  (passed 6 times in a row after). If it recurs, print what `units` held. One possible cause, from Immich's source: a
-  stream row's `updateId` is set when the row is updated (`updated_at` trigger), not when its transaction commits, so a
-  row committed after a later one of the same type was acknowledged is never sent (`upsertQuery`). That would affect
-  Immich's phone apps too.
+- **A change can reach Immich's sync stream a moment after the API call returns** (2026-11-04): a stream read at once
+  missed a rating most times in a probe, and a read 2 seconds later always had it. Tests that change something
+  through the API and then read the stream must read until the change arrives (`waitFor`), as `stream.test.ts` and the
+  F9 and F10 tests in `reconcile.test.ts` do.
 - **mtime ticks:** the kernel updates mtimes at its clock's tick (a few ms), so a test that edits a sidecar in place,
   keeping its size, right after reading it can leave the stamp unchanged. Change the size.
 - **Immich's background jobs run after API calls return** (thumbnails, a person's face): wait for them (`waitFor`)

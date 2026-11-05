@@ -1,10 +1,10 @@
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from "bun:test";
-import { copyFileSync, mkdtempSync, rmSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { FIXTURES, USERS, api, configFor, describeImmich, login, mediaFolder, newUser, waitFor } from "../../test/immich/harness.ts";
 import { PathMap } from "../core/path-map.ts";
-import type { AccountState } from "../core/xmp.ts";
+import type { AccountState, XmpFields } from "../core/xmp.ts";
 import { type Asset, getAsset } from "../immich/assets.ts";
 import { loginAccount } from "../immich/login.ts";
 import { Exiftool } from "../sidecars/exiftool.ts";
@@ -76,21 +76,30 @@ test("a unit whose media file is gone is only noted as gone, for its orphan side
   expect(store.unit(unit)?.synced).toEqual(synced);
 });
 
-/** Two fresh accounts, each with a library over one folder holding a photo and the sidecar Darktable wrote. */
-async function twoAccounts(prefix: string) {
+/**
+ * Two fresh accounts, each with a library over one folder holding a photo and the sidecar Darktable wrote. With
+ * `inbox`, the folder is an inbox and the photo is in its source "Phone", whose creator is Alex Example, and the
+ * settle time is a second.
+ */
+async function twoAccounts(prefix: string, options: { inbox?: boolean } = {}) {
   const admin = await login(USERS.alex);
   const [one, two] = [await newUser(admin.accessToken, "One"), await newUser(admin.accessToken, "Two")];
-  const config = configFor(join(dir, "state"), [
-    { name: "one", user: one },
-    { name: "two", user: two },
-  ]);
+  const folder = mediaFolder(prefix);
+  const config = configFor(
+    join(dir, "state"),
+    [
+      { name: "one", user: one },
+      { name: "two", user: two },
+    ],
+    options.inbox ? { paths: { inbox: folder.local }, sources: [{ folder: "Phone", creator: "Alex Example" }], timing: { settle: "1s" } } : {},
+  );
   await loginAccount(config, "one", one.password);
   await loginAccount(config, "two", two.password);
   const accounts = (await openAccounts(config)).open;
   const byName = new Map(accounts.map((account) => [account.account.name, account]));
 
-  const folder = mediaFolder(prefix);
-  const unit = join(folder.local, "photo.jpg");
+  const unit = join(folder.local, ...(options.inbox ? ["Phone"] : []), "photo.jpg");
+  mkdirSync(dirname(unit), { recursive: true });
   copyFileSync(join(FIXTURES, "photo.jpg"), unit);
   copyFileSync(join(FIXTURES, "darktable.xmp"), `${unit}.xmp`);
   for (const account of accounts) {
@@ -116,7 +125,7 @@ async function twoAccounts(prefix: string) {
     });
   await settled("the scans' metadata", (a, b) => a.exifInfo?.rating === 3 && b.exifInfo?.rating === 3);
   const token = async (name: "one" | "two") => (await login(name === "one" ? one : two)).accessToken;
-  return { admin, one, two, config, accounts, byName, unit, store, map, ctx, copy, read, settled, token };
+  return { admin, one, two, folder, config, accounts, byName, unit, store, map, ctx, copy, read, settled, token };
 }
 
 describeImmich("reconciling a unit with two accounts' copies", () => {
@@ -171,6 +180,12 @@ describeImmich("reconciling a unit with two accounts' copies", () => {
       for (const account of accounts) await consumeStream(account, store, map, { act: async (units) => void (await reconcile(ctx, units)) });
     };
     const entries = async () => (await readSidecar(exiftool, `${unit}.xmp`))!.fields.accounts;
+    // A change can reach the stream a moment after the API call returns: read until the sidecar shows it.
+    const syncUntil = (what: string, check: () => Promise<boolean>) =>
+      waitFor(what, async () => {
+        await sync();
+        return (await check()) ? true : undefined;
+      });
     await sync();
     expect(await entries()).toBeUndefined();
 
@@ -180,7 +195,7 @@ describeImmich("reconciling a unit with two accounts' copies", () => {
     await api("PUT", "/assets", { token: oneToken, body: { ids: [copy("one").id], isFavorite: true } });
     const album = await api<{ id: string }>("POST", "/albums", { token: oneToken, body: { albumName: "Lake trip", assetIds: [copy("one").id] } });
     await api("PUT", "/assets", { token: twoToken, body: { ids: [copy("two").id], visibility: "archive" } });
-    await sync();
+    await syncUntil("both accounts' state", async () => (await entries())?.length === 2 && (await entries())!.some((entry) => entry.albums.length > 0));
     const byUser = (list: AccountState[] | undefined) => (list ?? []).toSorted((a, b) => (a.user === oneId ? -1 : b.user === oneId ? 1 : 0));
     expect(byUser(await entries())).toEqual([
       { user: oneId, favorite: true, visibility: "timeline", albums: [{ id: album.id, name: "Lake trip" }] },
@@ -189,14 +204,14 @@ describeImmich("reconciling a unit with two accounts' copies", () => {
 
     // A rename reaches the sidecar, though no asset changed.
     await api("PATCH", `/albums/${album.id}`, { token: oneToken, body: { albumName: "Lake week" } });
-    await sync();
+    await syncUntil("the rename", async () => byUser(await entries())[0]?.albums[0]?.name === "Lake week");
     expect(byUser(await entries())[0]?.albums).toEqual([{ id: album.id, name: "Lake week" }]);
 
     // Undone: nothing left to record, so the field goes.
     await api("PUT", "/assets", { token: oneToken, body: { ids: [copy("one").id], isFavorite: false } });
     await api("DELETE", `/albums/${album.id}/assets`, { token: oneToken, body: { ids: [copy("one").id] } });
     await api("PUT", "/assets", { token: twoToken, body: { ids: [copy("two").id], visibility: "timeline" } });
-    await sync();
+    await syncUntil("nothing left to record", async () => (await entries()) === undefined);
     expect(await entries()).toBeUndefined();
     expect(store.albumsOf(copy("one").id)).toEqual([]);
   }, 180_000);
@@ -224,6 +239,12 @@ describeImmich("reconciling a unit with two accounts' copies", () => {
       for (const account of accounts) await consumeStream(account, store, map, { act: async (units) => void (await reconcile(ctx, units)) });
     };
     const sidecar = async () => (await readSidecar(exiftool, `${unit}.xmp`))!.fields;
+    // A change can reach the stream a moment after the API call returns: read until the sidecar shows it.
+    const syncUntil = (what: string, check: (fields: XmpFields) => boolean) =>
+      waitFor(what, async () => {
+        await sync();
+        return check(await sidecar()) ? true : undefined;
+      });
     await sync();
 
     // A face added by hand in account one, for a new person. The fixture's sidecar already has a hand-made tag,
@@ -236,7 +257,7 @@ describeImmich("reconciling a unit with two accounts' copies", () => {
       token: oneToken,
       body: { assetId: copy("one").id, personId: person.id, imageWidth: width, imageHeight: height, x: width / 4, y: height / 4, width: width / 4, height: height / 4 },
     });
-    await sync();
+    await syncUntil("the face's tag", (fields) => fields.hierarchicalSubject?.includes("People|Kit Example") === true);
     let fields = await sidecar();
     expect(fields.hierarchicalSubject).toEqual(expect.arrayContaining(["People|Kit Example", "People|Robin Example"]));
     const region = fields.regions?.regions.find((each) => each.name === "Kit Example");
@@ -246,7 +267,7 @@ describeImmich("reconciling a unit with two accounts' copies", () => {
 
     // A rename: the tag and region follow.
     await api("PUT", `/people/${person.id}`, { token: oneToken, body: { name: "Kit Renamed" } });
-    await sync();
+    await syncUntil("the rename", (fields) => fields.hierarchicalSubject?.includes("People|Kit Renamed") === true);
     fields = await sidecar();
     expect(fields.hierarchicalSubject).toContain("People|Kit Renamed");
     expect(fields.hierarchicalSubject).not.toContain("People|Kit Example");
@@ -255,10 +276,33 @@ describeImmich("reconciling a unit with two accounts' copies", () => {
     // The face is deleted: the daemon's tag and region go; the hand-made tag stays.
     const faces = await api<{ id: string }[]>("GET", `/faces?id=${copy("one").id}`, { token: oneToken });
     for (const face of faces) await api("DELETE", `/faces/${face.id}`, { token: oneToken, body: { force: false } });
-    await sync();
+    await syncUntil("the face's tag gone", (fields) => fields.hierarchicalSubject?.includes("People|Kit Renamed") === false);
     fields = await sidecar();
     expect(fields.hierarchicalSubject).not.toContain("People|Kit Renamed");
     expect(fields.hierarchicalSubject).toContain("People|Robin Example");
     expect(fields.regions).toBeUndefined();
+  }, 180_000);
+
+  test("an inbox unit tagged Promote is ready once every copy has read the sidecar; without a title it needs one", async () => {
+    const { unit, ctx, settled } = await twoAccounts("ready", { inbox: true });
+    const tagsOf = (asset: Asset) => (asset.tags ?? []).map((tag) => tag.value).sort();
+    await reconcile(ctx, [unit]);
+
+    // Tagged Promote in Darktable: not ready until both copies have read it.
+    const sidecar = (await readSidecar(exiftool, `${unit}.xmp`))!;
+    await writeSidecar(exiftool, sidecar, { tags: ["People/Robin Example", "Places/Lake", "Promote"] });
+    const tagged = await reconcile(ctx, [unit]);
+    expect(tagged.ready).toEqual([]);
+    expect(tagged.notReady).toEqual([{ unit, why: "a copy hasn't read the sidecar yet" }]);
+    await settled("Promote on both copies", (a, b) => tagsOf(a).includes("Promote") && tagsOf(b).includes("Promote"));
+    await Bun.sleep(1100);
+    const ready = await reconcile(ctx, [unit]);
+    expect(ready.ready.map((each) => [each.unit, each.title, each.copies.length])).toEqual([[unit, "Lake day", 2]]);
+
+    // The title goes: the unit needs one, and says so.
+    await writeSidecar(exiftool, (await readSidecar(exiftool, `${unit}.xmp`))!, { title: null });
+    const untitled = await reconcile(ctx, [unit]);
+    expect(untitled.notReady).toEqual([{ unit, why: "it has no title" }]);
+    expect((await readSidecar(exiftool, `${unit}.xmp`))!.fields.hierarchicalSubject).toContain("Promote|Needs a title");
   }, 180_000);
 });

@@ -93,11 +93,20 @@ export function testConfig(stateDir: string): Config {
 export function configFor(
   stateDir: string,
   accounts: { name: string; user: TestUser }[],
-  extra: { libraries?: Record<string, unknown>[]; paths?: Record<string, unknown> } = {},
+  extra: {
+    libraries?: Record<string, unknown>[];
+    paths?: Record<string, unknown>;
+    sources?: Record<string, unknown>[];
+    timing?: Record<string, unknown>;
+    filing?: Record<string, unknown>;
+  } = {},
 ): Config {
   return parseConfig(
     {
       paths: { state: stateDir, ...extra.paths },
+      ...(extra.sources ? { sources: extra.sources } : {}),
+      ...(extra.timing ? { timing: extra.timing } : {}),
+      ...(extra.filing ? { filing: extra.filing } : {}),
       immich: {
         url: IMMICH_URL,
         path_map: [{ immich: `${IMMICH_MEDIA}/`, local: `${MEDIA_DIR}/` }],

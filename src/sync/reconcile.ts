@@ -15,9 +15,11 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { Config } from "../config.ts";
 import { type FacesOutcome, type NamedFace, applyFaces } from "../core/faces.ts";
+import { readiness, withNeedsTitle } from "../core/filing.ts";
 import { type Base, type Side, type SideValues, mergeUnit, normalizeDescription, normalizeRating } from "../core/merge.ts";
 import { isDarktableInternalInImmich, sameTags } from "../core/tags.ts";
 import { withTitle } from "../core/titles.ts";
+import { PROMOTE_TAG } from "../core/naming.ts";
 import { type AccountState, type Wanted, type XmpFields, darktableReads, dateFromImmich, immichReads, offsetFromImmich, sameDate } from "../core/xmp.ts";
 import { type Asset, getAsset, refreshMetadata, restoreAssets, trashAssets } from "../immich/assets.ts";
 import { log } from "../log.ts";
@@ -66,6 +68,21 @@ export interface ReconcileReport {
   conflicts: { unit: string; problem: string }[];
   /** Units left for the next pass, and why. */
   waiting: { unit: string; why: string }[];
+  /** Inbox units ready to file (DESIGN.md, section 7)… */
+  ready: ReadyUnit[];
+  /** …and those tagged `Promote` that aren't yet, with why, and when to look again if it's a matter of time. */
+  notReady: { unit: string; why: string; inMs?: number }[];
+}
+
+/** An inbox unit that's ready to file, with what filing needs. */
+export interface ReadyUnit {
+  unit: string;
+  sidecar: Sidecar;
+  title: string;
+  creator: string | null;
+  /** The capture time as the merge has it, or null: filing then goes by Immich's. */
+  date: string | null;
+  copies: { account: string; asset: Asset }[];
 }
 
 interface Copy {
@@ -151,6 +168,17 @@ export function namedFaces(store: SyncStore, records: readonly AssetRecord[]): N
   return faces;
 }
 
+/** Whether Immich would read the same from two versions of a sidecar. */
+function sameImmichView(a: XmpFields, b: XmpFields): boolean {
+  const [x, y] = [immichReads(a), immichReads(b)];
+  return (
+    sameTags(x.tags, y.tags) &&
+    normalizeRating(x.rating) === normalizeRating(y.rating) &&
+    normalizeDescription(x.description) === normalizeDescription(y.description) &&
+    (x.date === undefined || y.date === undefined ? x.date === y.date : sameDate(x.date, y.date))
+  );
+}
+
 /** Whether a copy holds what Immich would read from the sidecar, so a refresh would change nothing. */
 function copyInStep(asset: Asset, fields: XmpFields): boolean {
   const expected = immichReads(fields);
@@ -187,7 +215,19 @@ function sourceOf(config: Config, unit: string): { creator: string } | undefined
 }
 
 export async function reconcile(ctx: ReconcileContext, units: readonly string[]): Promise<ReconcileReport> {
-  const report: ReconcileReport = { units: units.length, written: [], created: [], unread: [], refreshed: 0, trashed: [], restored: [], conflicts: [], waiting: [] };
+  const report: ReconcileReport = {
+    units: units.length,
+    written: [],
+    created: [],
+    unread: [],
+    refreshed: 0,
+    trashed: [],
+    restored: [],
+    conflicts: [],
+    waiting: [],
+    ready: [],
+    notReady: [],
+  };
   const refresh = new Map<OpenAccount, Set<string>>();
   const trash = new Map<OpenAccount, Set<string>>();
   const restore = new Map<OpenAccount, Set<string>>();
@@ -324,6 +364,8 @@ async function reconcileUnit(
     });
     merged.tags = faces.tags;
   }
+  // Section 7: an inbox unit tagged Promote without a title says so, in both tools.
+  if (source) merged.tags = withNeedsTitle(merged.tags, merged.title);
 
   // 3. Write the sidecar's changed fields, if the file is still as it was read.
   let stamp = sidecar?.stamp;
@@ -357,7 +399,9 @@ async function reconcileUnit(
 
   // 4. Tell Immich: copies that don't hold what they'd read from the sidecar read it again, and trash follows (F8).
   for (const copy of copies) {
-    if (fields && !catchingUp.has(copy.asset.id) && !copyInStep(copy.asset, fields)) tell.refresh(copy, fields);
+    // A copy catching up is asked again if the sidecar changed since it was asked: what it will read is out of date.
+    const asked = ctx.refreshing.get(copy.asset.id);
+    if (fields && (catchingUp.has(copy.asset.id) ? !sameImmichView(asked!.fields, fields) : !copyInStep(copy.asset, fields))) tell.refresh(copy, fields);
     if (copy.asset.isOffline) continue;
     if (merged.trashed && !copy.asset.isTrashed) tell.trash(copy);
     if (!merged.trashed && copy.asset.isTrashed) tell.restore(copy);
@@ -373,5 +417,36 @@ async function reconcileUnit(
       regions: faces?.madeRegions ?? previous?.synced.regions ?? [],
     };
     store.putUnits([{ path: unit, ...(stamp ? { sidecar: stamp } : {}), synced, updated: new Date().toISOString() }]);
+  }
+
+  // 6. Filing (section 7): whether an inbox unit tagged Promote is ready, for the filing job.
+  if (source && sidecar && fields && merged.tags.includes(PROMOTE_TAG)) {
+    const unreadable = allRecords.filter((record) => !ctx.accounts.has(record.account)).length;
+    const state = readiness({
+      tags: merged.tags,
+      title: merged.title,
+      rating: fields.rating,
+      copies: copies.map((copy) => ({
+        trashed: copy.asset.isTrashed,
+        inStep: copyInStep(copy.asset, fields!),
+        catchingUp: catchingUp.has(copy.asset.id),
+        changedAt: Date.parse(copy.asset.updatedAt),
+      })),
+      unreadable,
+      sidecarChangedAt: stamp?.mtimeMs ?? 0,
+      settleMs: ctx.config.timing.settleMs,
+      now: Date.now(),
+    });
+    if (state.ready) {
+      const current = stamp === sidecar.stamp ? sidecar : { path: sidecar.path, stamp: stamp!, fields };
+      report.ready.push({
+        unit,
+        sidecar: current,
+        title: merged.title!,
+        creator: fields.creator?.[0] ?? null,
+        date: merged.date,
+        copies: copies.map((copy) => ({ account: copy.record.account, asset: copy.asset })),
+      });
+    } else report.notReady.push({ unit, why: state.why, ...(state.inMs !== undefined ? { inMs: state.inMs } : {}) });
   }
 }
