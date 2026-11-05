@@ -331,6 +331,14 @@ async function reconcileUnit(
 
   const base: Base | undefined = previous?.synced;
   const catchingUp = new Set(copies.filter((copy) => isCatchingUp(ctx.refreshing, copy, fields)).map((copy) => copy.asset.id));
+  // A copy the last sync didn't see may have read an older sidecar: once there's a base, it isn't a side for the
+  // sidecar's values until it holds what the sidecar says. Otherwise a tag it never had, such as the title tag the
+  // daemon wrote before this account's copy was learned, would read as one it removed. Without a base, every copy is
+  // a side, so the union never drops a tag.
+  const known = base ? previous?.synced.copies : undefined;
+  for (const copy of copies) {
+    if (known && !known.includes(copy.asset.id) && !(fields && copyInStep(copy.asset, fields))) catchingUp.add(copy.asset.id);
+  }
   const sides: Side[] = copies.map((copy) => {
     const values = copyValues(copy.asset);
     // A copy catching up still says whether it's in the trash: that's not from the sidecar.
@@ -404,8 +412,9 @@ async function reconcileUnit(
   // 4. Tell Immich: copies that don't hold what they'd read from the sidecar read it again, and trash follows (F8).
   for (const copy of copies) {
     // A copy catching up is asked again if the sidecar changed since it was asked: what it will read is out of date.
-    const asked = ctx.refreshing.get(copy.asset.id);
-    if (fields && (catchingUp.has(copy.asset.id) ? !sameImmichView(asked!.fields, fields) : !copyInStep(copy.asset, fields))) tell.refresh(copy, fields);
+    // One never asked (newly seen) is asked if it doesn't hold what the sidecar says.
+    const asked = catchingUp.has(copy.asset.id) ? ctx.refreshing.get(copy.asset.id) : undefined;
+    if (fields && (asked ? !sameImmichView(asked.fields, fields) : !copyInStep(copy.asset, fields))) tell.refresh(copy, fields);
     if (copy.asset.isOffline) continue;
     if (merged.trashed && !copy.asset.isTrashed) tell.trash(copy);
     if (!merged.trashed && copy.asset.isTrashed) tell.restore(copy);
@@ -419,6 +428,7 @@ async function reconcileUnit(
       creator: fields?.creator?.[0] ?? null,
       people: faces?.madeTags ?? previous?.synced.people ?? [],
       regions: faces?.madeRegions ?? previous?.synced.regions ?? [],
+      copies: copies.map((copy) => copy.asset.id),
     };
     store.putUnits([{ path: unit, ...(stamp ? { sidecar: stamp } : {}), synced, updated: new Date().toISOString() }]);
   }

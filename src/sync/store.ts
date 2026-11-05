@@ -76,6 +76,8 @@ export interface SyncedValues extends Base {
   people?: string[];
   /** The face regions the daemon made (F10), so they can be told from other tools' regions. */
   regions?: { name: string; area: Area }[];
+  /** The copies (asset IDs) this sync read: one not among them may not have read the sidecar yet. */
+  copies?: string[];
 }
 
 export interface UnitRecord {

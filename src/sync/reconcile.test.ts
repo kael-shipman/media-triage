@@ -396,4 +396,22 @@ describeImmich("reconciling a unit with two accounts' copies", () => {
     expect(store.isBeingPutBack(destination)).toBe(false);
     expect(new FilingStore(state.db).get(unit)?.status).toBe("done");
   }, 180_000);
+
+  test("a copy learned after the first sync doesn't undo what that sync wrote, such as the title tag", async () => {
+    const { unit, accounts, store, map, ctx, copy, settled } = await twoAccounts("late-copy");
+    const tagsOf = (asset: Asset) => (asset.tags ?? []).map((tag) => tag.value).sort();
+    // The first sync sees only account one's copy; account two's read the sidecar before the title tag was written.
+    const late = copy("two").id;
+    store.removeAssets([late]);
+    await reconcile(ctx, [unit]);
+    expect(store.unit(unit)?.synced.title).toBe("Lake day");
+
+    await learnAllAssets(accounts.find((account) => account.account.name === "two")!, store, map);
+    expect(store.assetsAt(unit).map((record) => record.id)).toContain(late);
+    const second = await reconcile(ctx, [unit]);
+    expect(second.conflicts).toEqual([]);
+    expect(store.unit(unit)?.synced.title).toBe("Lake day");
+    expect((await readSidecar(exiftool, `${unit}.xmp`))!.fields.title).toBe("Lake day");
+    await settled("the title tag on both copies", (a, b) => tagsOf(a).includes("Title/Lake day") && tagsOf(b).includes("Title/Lake day"));
+  }, 180_000);
 });

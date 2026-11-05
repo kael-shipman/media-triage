@@ -180,6 +180,11 @@ If the state is lost, merge as a union, which never drops a tag, and report it.
   extraction updates the asset; its tags are replaced in a parallel step). After an hour it counts again, with a
   warning. A copy catching up is asked again if the sidecar has changed since it was asked. This is kept in memory: a
   restart forgets it.
+- **A copy the last sync didn't see isn't a side either,** once there's a base, until it holds what the sidecar says
+  (and it's asked to refresh). It may have read an older sidecar: a tag it never had, such as the title tag written
+  before this account's copy was learned, would read as one it removed (found by the daemon's smoke test,
+  2026-11-04). The unit's record keeps which copies it read. Without a base, every copy is a side, so the union never
+  drops a tag.
 - **Not yet:** removing GPS or a date (a side that drops one isn't acted on, so nothing is lost).
 - **A unit whose media file is gone** isn't reconciled: its record notes when it was seen gone (F11).
 - **In the daemon** (`src/sync/job.ts`): the full pass at start and daily; the `sync` job each minute and after every
@@ -718,3 +723,5 @@ with what changed, not with the size of the archive.
 - 2026-11-04: F10 built: faces and people kept in the state from the streams, tags and regions from them.
 - 2026-11-04: F11 built: orphan sidecars deleted by the full pass, once seen gone for the grace period.
 - 2026-11-04: filing built (milestone 8, steps 1–5): readiness, the plan, moving, holding the unit, putting back.
+- 2026-11-04: a copy the last sync didn't see isn't a side until it agrees with the sidecar (section 5): found by the
+  smoke test, it removed a title.
