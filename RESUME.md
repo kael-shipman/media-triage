@@ -8,12 +8,13 @@ you're about to build would change it, ask the author first.
 session stops partway. Each step ends with tests passing, the type check clean, a commit and a push; CI must stay
 green.
 
-**Last updated:** 2026-11-04. Milestones 1–6 of 8 are done. **Next: milestone 7** (F9–F11), below.
+**Last updated:** 2026-11-04. Milestones 1–6 of 8 are done. **Milestone 7** (F9–F11) is under way: F9 is done;
+**next is step 2** (a race to check), then F10, below.
 
 ## Working on it
 
 - **Bun 1.4** runs and builds it. Without Bun installed, `npx --yes bun@1.4.4` stands in for `bun`:
-  - `bun test`: the unit tests (320; 318 in CI, which skips the two that need Darktable), and the integration tests,
+  - `bun test`: the unit tests (358; 356 in CI, which skips the two that need Darktable), and the integration tests,
     skipped;
   - `bun run typecheck`: TypeScript, over `src/`, `scripts/` and `test/`;
   - `bun run build [version]`: executables for linux-x64 and linux-arm64 in `dist/` (`TARGETS=linux-x64` for one).
@@ -21,7 +22,7 @@ green.
   `127.0.0.1:2284`, with made-up users (`alex@example.com`, the admin, and `sam@example.com`).
   - `bun run immich up` starts it (about a minute) and `bun run immich down` deletes everything. Leave it down when
     you stop: its database is in memory anyway.
-  - `MEDIA_TRIAGE_IMMICH_TESTS=1 bun test` runs everything against it (360 tests). Run it twice in a row on one
+  - `MEDIA_TRIAGE_IMMICH_TESTS=1 bun test` runs everything against it (403 tests). Run it twice in a row on one
     instance before calling a step done: tests must not depend on what other tests left behind.
   - Shared test helpers are in `test/immich/harness.ts`: `describeImmich`, `mediaFolder`, `photos`,
     `indexedLibrary`, `newUser` (fresh users, for anything that changes an account for good, such as joining a
@@ -53,9 +54,10 @@ green.
 | exiftool (one process, the system's in a release), the namespace's config, reading, writing and creating sidecars | `src/sidecars/` | 5 |
 | The merge (`mergeUnit`) | `src/core/merge.ts` | 6 |
 | Sync: state (`SyncStore`), covered folders, the watcher, the full pass, each account's stream, the reconcile, the daemon's jobs | `src/sync/` | 6 |
+| Per-account state (F9): favorites, visibility and albums, from each copy and the stream's albums | `src/sync/reconcile.ts` (`accountStates`), `store.ts`, `stream.ts` | 7 |
 
-**The daemon's jobs:** account upkeep and the check, the full pass and sync (F1–F8 without F5), and the upgrade check.
-Nothing files yet, and per-account state, named faces and orphans aren't synced yet.
+**The daemon's jobs:** account upkeep and the check, the full pass and sync (F1–F9 without F5), and the upgrade check.
+Nothing files yet, and named faces and orphans aren't synced yet.
 
 **Found in Immich 3.3.5 while building milestones 3 and 4** (each is in DESIGN.md, and each has a test):
 - the sync stream refuses `AssetsV1` (use `AssetsV2`), carries no paths, and `AssetFacesV3` covers the whole cluster
@@ -102,17 +104,39 @@ These shape milestone 6; DESIGN.md has each.
 
 ## Next: milestone 7, F9–F11
 
-DESIGN.md section 6. The reconcile (`src/sync/reconcile.ts`) is where each goes; the stream already acknowledges these
-events without acting on them (`src/sync/stream.ts`, `assetOf`).
-1. **F9, per-account state:** each copy's `isFavorite`, `visibility` and album memberships (`AlbumToAssetV1`,
-   `AlbumToAssetDeleteV1`, `AlbumV2` for names) into `Wanted.accounts` (keyed by user ID; `planWrite` already writes
-   only what isn't the default). Album memberships need a store table (asset ↔ album, album names).
-2. **F10, named faces:** `AssetFaceV3` (faces on every asset in the cluster group) and `PersonV1` (names) into
-   `People|<name>` tags and regions (`regionFromFace`, with `exifInfo.orientation`). The state records which tags the
-   daemon made, so hand-made `People|…` tags are never removed. Videos get tags only. A store table for faces.
-3. **F11, orphan sidecars:** `src/core/orphans.ts` has the rules; the full pass sees media go. Seen, then gone for the
+DESIGN.md section 6. The reconcile (`src/sync/reconcile.ts`) is where each goes. The stream acknowledges people and
+faces' events without acting on them yet (`src/sync/stream.ts`, `assetOf`).
+1. [x] **F9, per-account state** (done 2026-11-04): migration 3 (`assets.favorite`; `albums` and `album_assets`, per
+   account, since an `AlbumDeleteV1` means the account lost the album); the stream records them and reconciles every
+   unit in an album that's renamed or lost (`recordAlbums`); the reconcile writes `wanted.accounts` from
+   `accountStates` (a locked copy goes by the stream's record; an account with no copy to go by keeps its entry;
+   `hidden` isn't recorded). A reset marks the account's albums stale instead of emptying them, and `sweep` drops
+   what's still stale once the stream completes. Also fixed: assets are learned only from the account's own asset
+   events and only if it owns them (an album event could name another user's asset, which was then recorded under
+   the wrong account). Tested end to end (`reconcile.test.ts`, F9).
+2. **Next: check a possible race in milestone 6, before F10.** After the daemon writes a sidecar and asks Immich to
+   refresh, the watcher sees the write and the unit is reconciled again about 2 s later. If a copy hasn't re-read the
+   sidecar by then, it still holds the old tags, and the tag-by-tag merge reads a tag the daemon just removed as one
+   that copy added, and puts it back. Test it with the development Immich (remove a tag in Darktable, reconcile, then
+   reconcile again at once). If it's real, one fix: remember when each copy was asked to refresh, and leave out a
+   copy as a side until its `updatedAt` is later than that (check that a refresh bumps `updatedAt`).
+3. **F10, named faces:** `AssetFaceV3` (faces on every asset in the cluster group; `personId` is the person group's)
+   and `PersonV1` (each account's own records, with its own name and `isHidden`) into `People|<name>` tags and regions
+   (`regionFromFace`, with `exifInfo.orientation`). Plan, from Immich 3.3.5's source (`sync.repository.ts`,
+   `asset-response.dto.ts`):
+   - `getAsset`'s `people` have no face boxes, so keep the faces in the store (migration 4: `faces`, keyed by face ID,
+     with asset, person, box, image size, source, `isVisible`, `deletedAt`; `people` per account: name, hidden; both
+     with `stale`, swept like albums). Filing (milestone 8) needs the old copy's faces from the state anyway.
+   - Face events for assets the store doesn't know aren't learned: each account's own stream reports its assets.
+   - A `PersonV1` rename reconciles every unit with a face of that person.
+   - Counted: visible, undeleted faces whose person the copy's account names and doesn't hide (any copy). The tag is
+     `People/<name>` with any `/` in the name as `|` (F4's translation). Regions for photos only, each person's faces
+     from the first copy (by account) that has them, so twins don't double them.
+   - The state (`SyncedValues`) records the tags and regions the daemon made: a `People/…` tag already there is hand
+     made and never removed; a made one goes when its face does.
+4. **F11, orphan sidecars:** `src/core/orphans.ts` has the rules; the full pass sees media go. Seen, then gone for the
    grace period (1 h): delete; never seen: report; conflict copies: report.
-4. **Not done in milestone 6, worth doing:** removing GPS or a date when a side drops one (now ignored, so nothing is
+5. **Not done in milestone 6, worth doing:** removing GPS or a date when a side drops one (now ignored, so nothing is
    lost); a test that the daemon's watcher-to-reconcile path works without the development Immich (the smoke test in
    step 7 below was by hand).
 

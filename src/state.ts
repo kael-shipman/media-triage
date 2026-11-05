@@ -31,6 +31,26 @@ const MIGRATIONS: readonly string[] = [
     synced text not null,
     updated text not null
   ) strict`,
+  // 3: per-account state (F9): each asset's favorite, and the albums each account's stream reports, with their
+  // assets. `stale` marks what a reset of the account's stream hasn't sent again yet; what's still stale once the
+  // stream has been read whole is gone.
+  `alter table assets add column favorite integer not null default 0;
+  create table albums (
+    account text not null,
+    id text not null,
+    name text not null,
+    stale integer not null default 0,
+    primary key (account, id)
+  ) strict;
+  create table album_assets (
+    account text not null,
+    album text not null,
+    asset text not null,
+    stale integer not null default 0,
+    primary key (account, album, asset)
+  ) strict;
+  create index album_assets_asset on album_assets (asset);
+  create index album_assets_album on album_assets (album)`,
 ];
 
 /** The daemon's SQLite database, in the state folder. */

@@ -9,7 +9,7 @@ import type { Config } from "../config.ts";
 import { type Base, type Side, type SideValues, mergeUnit, normalizeDescription, normalizeRating } from "../core/merge.ts";
 import { isDarktableInternalInImmich, sameTags } from "../core/tags.ts";
 import { withTitle } from "../core/titles.ts";
-import { type Wanted, type XmpFields, darktableReads, dateFromImmich, immichReads, offsetFromImmich, sameDate } from "../core/xmp.ts";
+import { type AccountState, type Wanted, type XmpFields, darktableReads, dateFromImmich, immichReads, offsetFromImmich, sameDate } from "../core/xmp.ts";
 import { type Asset, getAsset, refreshMetadata, restoreAssets, trashAssets } from "../immich/assets.ts";
 import { log } from "../log.ts";
 import type { Exiftool } from "../sidecars/exiftool.ts";
@@ -76,6 +76,33 @@ export function darktableValues(fields: XmpFields): SideValues {
     date: fields.date ?? fields.immichDate ?? null,
     gps: fields.latitude !== undefined && fields.longitude !== undefined ? { latitude: fields.latitude, longitude: fields.longitude } : null,
   };
+}
+
+/** Visibilities a person chose: archived and locked. "hidden" is Immich's own, for a Live Photo's video. */
+const chosenVisibility = (visibility: string) => (visibility === "archive" || visibility === "locked" ? visibility : "timeline");
+
+/**
+ * Each account's state for a unit (F9), from its copies: what the API says of each one it could read, or, for a locked
+ * copy, which Immich won't show without the account's PIN, what the stream said. Albums are those the store holds the
+ * copy in. An account with no copy to go by (its session isn't open, or the copy is gone) keeps what the sidecar has.
+ */
+export function accountStates(
+  store: SyncStore,
+  records: readonly AssetRecord[],
+  read: ReadonlyMap<string, Asset>,
+  current: readonly AccountState[],
+): AccountState[] {
+  const known = new Map<string, AccountState>();
+  for (const record of records) {
+    const asset = read.get(record.id);
+    if (!asset && record.visibility !== "locked") continue;
+    const state = known.get(record.owner) ?? { user: record.owner, favorite: false, visibility: "timeline", albums: [] };
+    state.favorite ||= asset ? asset.isFavorite : record.favorite;
+    if (state.visibility === "timeline") state.visibility = chosenVisibility(asset?.visibility ?? record.visibility);
+    for (const album of store.albumsOf(record.id)) if (!state.albums.some((held) => held.id === album.id)) state.albums.push(album);
+    known.set(record.owner, state);
+  }
+  return [...current.filter((entry) => !known.has(entry.user)), ...known.values()];
 }
 
 /** Whether a copy holds what Immich would read from the sidecar, so a refresh would change nothing. */
@@ -176,9 +203,9 @@ async function reconcileUnit(
   }
 
   const copies: Copy[] = [];
-  for (const record of store.assetsAt(unit)) {
-    const account = ctx.accounts.get(record.account);
-    if (!account) continue;
+  const records = store.assetsAt(unit).filter((record) => ctx.accounts.has(record.account));
+  for (const record of records) {
+    const account = ctx.accounts.get(record.account)!;
     const asset = await getAsset(account.client, record.id);
     if (asset) copies.push({ record, account, asset });
   }
@@ -209,6 +236,7 @@ async function reconcileUnit(
     }
     if (merged.gps !== null) wanted.gps = merged.gps;
     if (source && !fields.creator?.length) wanted.creator = source.creator;
+    wanted.accounts = accountStates(store, records, new Map(copies.map((copy) => [copy.asset.id, copy.asset])), fields.accounts ?? []);
     if (sidecar) {
       const outcome = await writeSidecar(exiftool, sidecar, wanted, { dryRun });
       if (outcome.status === "changed-meanwhile") {

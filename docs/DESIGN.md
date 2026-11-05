@@ -77,13 +77,17 @@ video. Units in the archive count as much as units in the inbox (section 1).
    - `AssetsV2`: trash (`deletedAt`), `isFavorite`, `visibility` (archived, locked), the library, the Live Photo's
      video;
    - `AssetExifsV1`: rating, description, dates;
-   - `AlbumsV2` and `AlbumToAssetsV1`: albums and their assets;
+   - `AlbumsV2` and `AlbumToAssetsV1`: albums and their assets. An `AlbumDeleteV1` means the account no longer sees
+     the album: it was deleted, or the account lost access (`album_user_delete_audit`). So the state keeps albums and
+     their assets per account;
    - `PeopleV1` and `AssetFacesV3`: people and their names, and each face's person, box, source and deletion.
      `AssetFacesV3` covers every asset in the account's cluster group, so once the accounts share a group, each
      account's stream also reports the faces on the other accounts' copies.
 
    **No paths:** an asset in the stream has its file name but not its path. The daemon looks up the path of each
-   asset it hasn't seen before, and keeps every asset's ID and path in its state. A library asset's path never changes,
+   asset it hasn't seen before, and keeps every asset's ID and path in its state. Each asset is recorded with its
+   owner's account, whose session changes it: album events can name other users' assets (in an album shared with the
+   account), and those are left to their own account's stream. A library asset's path never changes,
    since its identity is a hash of the path (`library.service.ts`), so each is looked up once (section 13).
    A locked asset is the exception: without the account's PIN, Immich leaves it out of searches and answers for it
    as for a missing one. So the daemon knows a locked asset's path only if it saw the asset before it was locked.
@@ -99,7 +103,9 @@ video. Units in the archive count as much as units in the inbox (section 1).
    **Resets:** instead of changes, the server can send `SyncResetV1`. It does when the session was flagged for a
    reset, or when its last completed sync is more than 30 days old (`sync.service.ts`, `needsFullSync`), since older
    changes may have left its audit tables. The daemon acknowledges the reset, which clears the session's checkpoints,
-   reads the whole account again as on a first run, and logs it.
+   reads the whole account again as on a first run, and logs it. What the account's stream reported before (its
+   albums) is kept, marked stale, until the stream sends it again; once the stream has been read whole, what's still
+   stale is gone, and its units are reconciled. Emptying it at the reset would rewrite those sidecars twice.
 
    Tags have no sync type. A tag change reaches the daemon as Immich's own sidecar write (point 1), and the merge
    reads each copy's tags through the API.
@@ -162,8 +168,8 @@ If the state is lost, merge as a union, which never drops a tag, and report it.
 - **Telling Immich:** when the sidecar is written, every copy is refreshed; otherwise only copies that don't hold what
   they'd read from the sidecar (`immichReads`), such as another account's copy after an edit in Immich. Refreshes,
   trashes and restores are batched per account.
-- **Not yet:** removing GPS or a date (a side that drops one isn't acted on, so nothing is lost), and per-account
-  state, named faces and orphans (milestone 7).
+- **Not yet:** removing GPS or a date (a side that drops one isn't acted on, so nothing is lost), and named faces and
+  orphans (milestone 7).
 - **In the daemon** (`src/sync/job.ts`): the full pass at start and daily; the `sync` job each minute and after every
   change the watcher sees, reading each account's stream (a batch is reconciled before it's acknowledged), then up to
   200 units that have been quiet for 2 seconds, so a first run over the whole archive doesn't hold up other jobs.
@@ -264,6 +270,13 @@ If the state is lost, merge as a union, which never drops a tag, and report it.
     an entry leaves out `Favorite` when false, `Visibility` when "timeline", and `Albums` when there are none. So most
     sidecars never get the field, and the first pass over the archive doesn't rewrite them all.
   - **Not mirrored between accounts:** they belong to each person.
+  - **Where they come from** (`src/sync/reconcile.ts`, `accountStates`): each copy read through the API, with the
+    albums the state holds it in, from the account's stream (an album rename or a lost album reconciles every unit in
+    it). A locked copy, which Immich won't show without the account's PIN, goes by what the stream last said; locking
+    also takes it out of every album (`asset.service.ts`). An account with no copy to go by (its session isn't open,
+    or the copy is gone) keeps its entry as it is. `hidden` isn't recorded: Immich gives it to a Live Photo's video.
+  - **Written only where there's a sidecar,** like every other field: in the archive, a photo with no sidecar doesn't
+    get one for its favorite.
   - Filing puts them back (section 7).
   - Writing a custom namespace needs an exiftool config that defines it, which the daemon writes to a temporary folder
     and passes to exiftool. **Checked: Immich and Darktable both keep it** when they rewrite a sidecar (Immich 3.3.5
@@ -614,3 +627,5 @@ with what changed, not with the size of the archive.
   (F6), Darktable dropping the date's offset (F6), Immich showing Darktable's own tags (F4), and how regions'
   coordinates relate to Immich's faces (F10). Checked that Immich and Darktable keep the namespace and regions (F9,
   F10). F9's namespace and its key settled. The author decided F5 isn't needed.
+- 2026-11-04: F9 built: each account's state, from its copies and its stream's albums; a reset keeps what the stream
+  reported, stale, until it's sent again. Assets are recorded with their owner's account only.

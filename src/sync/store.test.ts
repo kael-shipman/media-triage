@@ -27,6 +27,7 @@ const asset = (id: string, account: string, local: string | null): AssetRecord =
   local,
   trashed: false,
   visibility: "timeline",
+  favorite: false,
 });
 
 test("assets: kept, found by local path across accounts, updated, forgotten", () => {
@@ -34,14 +35,57 @@ test("assets: kept, found by local path across accounts, updated, forgotten", ()
   expect(store.assetsAt("/media/a.jpg").map((record) => record.id)).toEqual(["a1", "s1"]);
   expect(store.unknownAssets(["a1", "x", "s2"])).toEqual(["x"]);
 
-  store.updateAssets([{ id: "a1", trashed: true }, { id: "s1", visibility: "archive" }]);
-  expect(store.asset("a1")).toMatchObject({ trashed: true, visibility: "timeline", path: "/mnt/media/a1.jpg" });
-  expect(store.asset("s1")).toMatchObject({ trashed: false, visibility: "archive" });
+  store.updateAssets([{ id: "a1", trashed: true }, { id: "s1", visibility: "archive", favorite: true }]);
+  expect(store.asset("a1")).toMatchObject({ trashed: true, visibility: "timeline", favorite: false, path: "/mnt/media/a1.jpg" });
+  expect(store.asset("s1")).toMatchObject({ trashed: false, visibility: "archive", favorite: true });
 
   store.forgetAccount("sam");
   expect(store.countAssets()).toBe(1);
   store.removeAssets(["a1"]);
   expect(store.asset("a1")).toBeUndefined();
+});
+
+test("albums: names and assets per account, renames, lost albums, and an asset's albums across accounts", () => {
+  expect(store.putAlbums("alex", [{ id: "album1", name: "Lake" }, { id: "album2", name: "Beach" }])).toEqual([]);
+  store.putAlbums("sam", [{ id: "album1", name: "Lake" }]);
+  store.addToAlbums("alex", [{ album: "album1", asset: "a1" }, { album: "album2", asset: "a1" }, { album: "album2", asset: "a2" }]);
+  store.addToAlbums("sam", [{ album: "album1", asset: "s1" }]);
+  expect(store.albumsOf("a1")).toEqual([{ id: "album1", name: "Lake" }, { id: "album2", name: "Beach" }]);
+  expect(store.albumAssets("album1")).toEqual(["a1", "s1"]);
+
+  // A rename is reported, with the album's assets; a new album isn't.
+  expect(store.putAlbums("alex", [{ id: "album2", name: "Sea" }, { id: "album3", name: "New" }])).toEqual(["album2"]);
+  expect(store.albumsOf("a2")).toEqual([{ id: "album2", name: "Sea" }]);
+
+  // Taken out of one album; alex loses another, which sam still sees.
+  store.removeFromAlbums("alex", [{ album: "album2", asset: "a2" }]);
+  expect(store.albumsOf("a2")).toEqual([]);
+  expect(store.removeAlbums("alex", ["album1"])).toEqual(["a1"]);
+  expect(store.albumsOf("a1")).toEqual([{ id: "album2", name: "Sea" }]);
+  expect(store.albumsOf("s1")).toEqual([{ id: "album1", name: "Lake" }]);
+
+  // A removed asset leaves its albums.
+  store.removeAssets(["a1"]);
+  expect(store.albumAssets("album2")).toEqual([]);
+});
+
+test("a reset keeps albums, stale, until the stream has sent them again; what it didn't send is swept", () => {
+  store.putAssets([asset("a1", "alex", "/media/a.jpg")]);
+  store.putAlbums("alex", [{ id: "kept", name: "Kept" }, { id: "gone", name: "Gone" }]);
+  store.addToAlbums("alex", [{ album: "kept", asset: "a1" }, { album: "kept", asset: "a2" }, { album: "gone", asset: "a3" }]);
+  store.putAlbums("sam", [{ id: "kept", name: "Kept" }]);
+  store.addToAlbums("sam", [{ album: "kept", asset: "s1" }]);
+  expect(store.sweep("alex")).toBeUndefined();
+
+  store.forgetAccount("alex");
+  expect(store.countAssets("alex")).toBe(0);
+  expect(store.albumsOf("a2")).toEqual([{ id: "kept", name: "Kept" }]);
+  store.putAlbums("alex", [{ id: "kept", name: "Kept" }]);
+  store.addToAlbums("alex", [{ album: "kept", asset: "a1" }]);
+  expect(store.sweep("alex")?.sort()).toEqual(["a2", "a3"]);
+  expect(store.albumAssets("kept")).toEqual(["a1", "s1"]);
+  expect(store.albumsOf("a3")).toEqual([]);
+  expect(store.sweep("alex")).toBeUndefined();
 });
 
 test("units: last-synced values and the sidecar's stamp, kept between openings", () => {

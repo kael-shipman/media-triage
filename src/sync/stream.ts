@@ -29,7 +29,7 @@ export interface StreamOutcome {
   reset: boolean;
 }
 
-/** The asset events that can change what a unit should say. Albums, people and faces are milestone 7's. */
+/** The asset events that can change what a unit should say. Faces and people are handled by `consumeStream`. */
 function assetOf(event: SyncEvent): string | undefined {
   switch (event.type) {
     case "AssetV2":
@@ -45,6 +45,12 @@ function assetOf(event: SyncEvent): string | undefined {
   }
 }
 
+/**
+ * The account's own assets among these. An account can also read others' assets, such as those in an album shared
+ * with it, but each asset is recorded with its owner's account, whose session changes it.
+ */
+const own = (account: OpenAccount, assets: readonly Asset[]) => assets.filter((asset) => asset.ownerId === account.userId);
+
 function record(account: OpenAccount, map: PathMap, asset: Asset): AssetRecord {
   return {
     id: asset.id,
@@ -55,6 +61,7 @@ function record(account: OpenAccount, map: PathMap, asset: Asset): AssetRecord {
     local: map.toLocal(asset.originalPath) ?? null,
     trashed: asset.isTrashed,
     visibility: asset.visibility,
+    favorite: asset.isFavorite,
   };
 }
 
@@ -76,7 +83,7 @@ export async function learnAssets(
     const libraries = new Set(unknown.flatMap((asset) => (asset.library ? [asset.library] : [])));
     for (const library of libraries) {
       for await (const page of libraryPages(account.client, library)) {
-        store.putAssets(page.map((asset) => record(account, map, asset)));
+        store.putAssets(own(account, page).map((asset) => record(account, map, asset)));
         for (const asset of page) wanted.delete(asset.id);
       }
     }
@@ -84,7 +91,7 @@ export async function learnAssets(
   const found: AssetRecord[] = [];
   for (const id of wanted) {
     const asset = await getAsset(account.client, id);
-    if (asset) found.push(record(account, map, asset));
+    if (asset) found.push(...own(account, [asset]).map((asset) => record(account, map, asset)));
   }
   store.putAssets(found);
 }
@@ -93,8 +100,9 @@ export async function learnAssets(
 export async function learnAllAssets(account: OpenAccount, store: SyncStore, map: PathMap): Promise<number> {
   let count = 0;
   for await (const page of searchPages(account.client, {})) {
-    store.putAssets(page.map((asset) => record(account, map, asset)));
-    count += page.length;
+    const mine = own(account, page);
+    store.putAssets(mine.map((asset) => record(account, map, asset)));
+    count += mine.length;
   }
   return count;
 }
@@ -114,24 +122,32 @@ export async function consumeStream(account: OpenAccount, store: SyncStore, map:
     outcome.batches++;
     outcome.events += batch.events.length;
 
-    // Record what the stream says about assets, and learn the paths of new ones.
+    // Record what the stream says about assets, and learn the paths of new ones. Only the account's own assets are
+    // learned: other events can name others' assets (in a shared album), which their own account's stream reports.
     const unknown = new Map<string, string | null>();
-    const changes: { id: string; trashed: boolean; visibility: string }[] = [];
+    const changes: { id: string; trashed: boolean; visibility: string; favorite: boolean }[] = [];
     const deleted: string[] = [];
+    const ownIds = new Set<string>();
     for (const event of batch.events) {
       if (event.type === "AssetDeleteV1") deleted.push(event.data.assetId);
+      if (event.type === "AssetExifV1") ownIds.add(event.data.assetId);
       if (event.type !== "AssetV2") continue;
-      changes.push({ id: event.data.id, trashed: event.data.deletedAt !== null, visibility: event.data.visibility });
+      ownIds.add(event.data.id);
+      changes.push({ id: event.data.id, trashed: event.data.deletedAt !== null, visibility: event.data.visibility, favorite: event.data.isFavorite });
       if (!store.asset(event.data.id)) unknown.set(event.data.id, event.data.libraryId);
     }
-    const ids = [...new Set(batch.events.flatMap((event) => assetOf(event) ?? []))];
-    for (const id of store.unknownAssets(ids)) if (!unknown.has(id)) unknown.set(id, null);
+    for (const id of store.unknownAssets([...ownIds])) if (!unknown.has(id)) unknown.set(id, null);
     await learnAssets(account, store, map, [...unknown].map(([id, library]) => ({ id, library })), options.bulkLookup);
     store.updateAssets(changes);
 
+    // Albums (F9): a rename or a lost album changes every sidecar that names it.
+    const touched = recordAlbums(account.account.name, store, batch.events);
+    if (batch.complete) touched.push(...(store.sweep(account.account.name) ?? []));
+
     // The units those assets belong to, here. Deleted assets' units are acted on too: their copy is gone.
+    const ids = [...new Set(batch.events.flatMap((event) => assetOf(event) ?? []))];
     const units = new Set<string>();
-    for (const id of [...ids, ...deleted]) {
+    for (const id of [...ids, ...deleted, ...touched]) {
       const local = store.asset(id)?.local;
       if (local) units.add(local);
     }
@@ -140,4 +156,27 @@ export async function consumeStream(account: OpenAccount, store: SyncStore, map:
     if (!options.dryRun) await acknowledge(account.client, batch.acks);
   }
   return outcome;
+}
+
+/** Records a batch's album events, in order. Returns the assets in albums that were renamed or are gone. */
+function recordAlbums(account: string, store: SyncStore, events: readonly SyncEvent[]): string[] {
+  const touched: string[] = [];
+  for (const event of events) {
+    switch (event.type) {
+      case "AlbumV2":
+        for (const album of store.putAlbums(account, [{ id: event.data.id, name: event.data.name }])) touched.push(...store.albumAssets(album));
+        break;
+      case "AlbumDeleteV1":
+        touched.push(...store.removeAlbums(account, [event.data.albumId]));
+        break;
+      case "AlbumToAssetV1":
+      case "AlbumToAssetBackfillV1":
+        store.addToAlbums(account, [{ album: event.data.albumId, asset: event.data.assetId }]);
+        break;
+      case "AlbumToAssetDeleteV1":
+        store.removeFromAlbums(account, [{ album: event.data.albumId, asset: event.data.assetId }]);
+        break;
+    }
+  }
+  return touched;
 }

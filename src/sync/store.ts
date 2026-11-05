@@ -4,6 +4,13 @@
 //   asset's path never changes, so each asset is looked up once.
 // - Units: for each media file, the values last made equal everywhere (the base of the three-way merge), and its
 //   sidecar's stamp when it was last read or written, so the full pass skips a sidecar until it changes again.
+// - Albums: each account's albums and their assets, as its stream reports them, for each copy's album memberships
+//   (F9). Album IDs are the server's, but access is each account's: an account that loses access to an album is told
+//   so on its own stream only.
+//
+// After a reset of an account's stream, what it reported before is kept but marked stale, and each row it sends again
+// is fresh. Once the stream has been read whole, what's still stale is gone (`sweep`). So a reset doesn't empty the
+// albums until they're sent again, which would rewrite every sidecar twice.
 //
 // Every write is one transaction.
 
@@ -26,6 +33,13 @@ export interface AssetRecord {
   trashed: boolean;
   /** Immich's visibility: "timeline", "archive", "locked" or "hidden". */
   visibility: string;
+  favorite: boolean;
+}
+
+/** An album holding an asset, as some account sees it. */
+export interface AlbumRef {
+  id: string;
+  name: string;
 }
 
 /** The values a unit last had everywhere: the base the next merge compares each side with (src/core/merge.ts). */
@@ -53,6 +67,7 @@ interface AssetRow {
   local: string | null;
   trashed: number;
   visibility: string;
+  favorite: number;
 }
 
 interface UnitRow {
@@ -64,7 +79,10 @@ interface UnitRow {
   updated: string;
 }
 
-const toAsset = (row: AssetRow): AssetRecord => ({ ...row, trashed: row.trashed === 1 });
+const toAsset = (row: AssetRow): AssetRecord => ({ ...row, trashed: row.trashed === 1, favorite: row.favorite === 1 });
+
+/** The kv key saying an account's stream was reset and its stale rows are to be swept once it's read whole. */
+const sweepKey = (account: string) => `sync.sweep.${account}`;
 
 function toUnit(row: UnitRow): UnitRecord {
   const sidecar =
@@ -80,22 +98,26 @@ export class SyncStore {
   /** Adds or replaces assets. */
   putAssets(records: readonly AssetRecord[]): void {
     const insert = this.db.query(
-      `insert into assets (id, account, owner, library, path, local, trashed, visibility) values (?, ?, ?, ?, ?, ?, ?, ?)
+      `insert into assets (id, account, owner, library, path, local, trashed, visibility, favorite) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
        on conflict (id) do update set account = excluded.account, owner = excluded.owner, library = excluded.library,
-         path = excluded.path, local = excluded.local, trashed = excluded.trashed, visibility = excluded.visibility`,
+         path = excluded.path, local = excluded.local, trashed = excluded.trashed, visibility = excluded.visibility,
+         favorite = excluded.favorite`,
     );
     this.db.transaction(() => {
       for (const record of records) {
-        insert.run(record.id, record.account, record.owner, record.library, record.path, record.local, record.trashed ? 1 : 0, record.visibility);
+        insert.run(record.id, record.account, record.owner, record.library, record.path, record.local, record.trashed ? 1 : 0, record.visibility, record.favorite ? 1 : 0);
       }
     })();
   }
 
   /** Changes what the sync stream reports about known assets, without touching their paths. */
-  updateAssets(changes: readonly { id: string; trashed?: boolean; visibility?: string }[]): void {
-    const update = this.db.query("update assets set trashed = coalesce(?, trashed), visibility = coalesce(?, visibility) where id = ?");
+  updateAssets(changes: readonly { id: string; trashed?: boolean; visibility?: string; favorite?: boolean }[]): void {
+    const update = this.db.query(
+      "update assets set trashed = coalesce(?, trashed), visibility = coalesce(?, visibility), favorite = coalesce(?, favorite) where id = ?",
+    );
+    const flag = (value: boolean | undefined) => (value === undefined ? null : value ? 1 : 0);
     this.db.transaction(() => {
-      for (const change of changes) update.run(change.trashed === undefined ? null : change.trashed ? 1 : 0, change.visibility ?? null, change.id);
+      for (const change of changes) update.run(flag(change.trashed), change.visibility ?? null, flag(change.favorite), change.id);
     })();
   }
 
@@ -115,16 +137,121 @@ export class SyncStore {
     return this.db.query<AssetRow, [string]>("select * from assets where local = ? order by account, id").all(local).map(toAsset);
   }
 
+  /** Forgets assets, and their places in albums. */
   removeAssets(ids: readonly string[]): void {
     const remove = this.db.query("delete from assets where id = ?");
+    const unalbum = this.db.query("delete from album_assets where asset = ?");
     this.db.transaction(() => {
-      for (const id of ids) remove.run(id);
+      for (const id of ids) {
+        remove.run(id);
+        unalbum.run(id);
+      }
     })();
   }
 
-  /** Forgets an account's assets, as after a reset of its sync stream, before it's read whole again. */
+  /**
+   * After a reset of an account's sync stream, before it's read whole again: forgets its assets, which are learned
+   * again with their paths, and marks its albums stale until the stream sends them again (`sweep`).
+   */
   forgetAccount(account: string): void {
-    this.db.query("delete from assets where account = ?").run(account);
+    this.db.transaction(() => {
+      this.db.query("delete from assets where account = ?").run(account);
+      this.db.query("update albums set stale = 1 where account = ?").run(account);
+      this.db.query("update album_assets set stale = 1 where account = ?").run(account);
+      this.db.query("insert into kv (key, value) values (?, '1') on conflict (key) do update set value = excluded.value").run(sweepKey(account));
+    })();
+  }
+
+  /**
+   * Once an account's stream has been read whole after a reset: forgets what it didn't send again, since that's gone.
+   * Returns the assets whose albums changed, or undefined when there was no reset to finish.
+   */
+  sweep(account: string): string[] | undefined {
+    if (!this.db.query("select 1 from kv where key = ?").get(sweepKey(account))) return undefined;
+    return this.db.transaction(() => {
+      const assets = this.db
+        .query<{ asset: string }, [string, string]>(
+          `select asset from album_assets where account = ? and stale = 1
+           union select asset from album_assets where album in (select id from albums where account = ? and stale = 1)`,
+        )
+        .all(account, account)
+        .map((row) => row.asset);
+      this.db.query("delete from album_assets where account = ? and stale = 1").run(account);
+      this.db.query("delete from album_assets where account = ? and album in (select id from albums where account = ? and stale = 1)").run(account, account);
+      this.db.query("delete from albums where account = ? and stale = 1").run(account);
+      this.db.query("delete from kv where key = ?").run(sweepKey(account));
+      return [...new Set(assets)];
+    })();
+  }
+
+  // Albums (F9).
+
+  /** Adds or renames an account's albums. Returns the IDs of those whose name changed (not the new ones). */
+  putAlbums(account: string, albums: readonly AlbumRef[]): string[] {
+    const current = this.db.query<{ name: string }, [string, string]>("select name from albums where account = ? and id = ?");
+    const insert = this.db.query(
+      `insert into albums (account, id, name, stale) values (?, ?, ?, 0)
+       on conflict (account, id) do update set name = excluded.name, stale = 0`,
+    );
+    return this.db.transaction(() => {
+      const renamed: string[] = [];
+      for (const album of albums) {
+        const before = current.get(account, album.id);
+        if (before && before.name !== album.name) renamed.push(album.id);
+        insert.run(account, album.id, album.name);
+      }
+      return renamed;
+    })();
+  }
+
+  /** The account no longer sees these albums: they were deleted, or it lost access. Returns the assets they held. */
+  removeAlbums(account: string, ids: readonly string[]): string[] {
+    const members = this.db.query<{ asset: string }, [string, string]>("select asset from album_assets where account = ? and album = ?");
+    const unalbum = this.db.query("delete from album_assets where account = ? and album = ?");
+    const remove = this.db.query("delete from albums where account = ? and id = ?");
+    return this.db.transaction(() => {
+      const assets = new Set<string>();
+      for (const id of ids) {
+        for (const row of members.all(account, id)) assets.add(row.asset);
+        unalbum.run(account, id);
+        remove.run(account, id);
+      }
+      return [...assets];
+    })();
+  }
+
+  /** Records assets in albums, as an account's stream reports them. */
+  addToAlbums(account: string, entries: readonly { album: string; asset: string }[]): void {
+    const insert = this.db.query(
+      `insert into album_assets (account, album, asset, stale) values (?, ?, ?, 0)
+       on conflict (account, album, asset) do update set stale = 0`,
+    );
+    this.db.transaction(() => {
+      for (const { album, asset } of entries) insert.run(account, album, asset);
+    })();
+  }
+
+  removeFromAlbums(account: string, entries: readonly { album: string; asset: string }[]): void {
+    const remove = this.db.query("delete from album_assets where account = ? and album = ? and asset = ?");
+    this.db.transaction(() => {
+      for (const { album, asset } of entries) remove.run(account, album, asset);
+    })();
+  }
+
+  /** The assets in an album, as any account sees it. */
+  albumAssets(album: string): string[] {
+    return this.db.query<{ asset: string }, [string]>("select distinct asset from album_assets where album = ? order by asset").all(album).map((row) => row.asset);
+  }
+
+  /** The albums holding an asset, as any account sees them, with a name an account knows them by. */
+  albumsOf(asset: string): AlbumRef[] {
+    return this.db
+      .query<AlbumRef, [string]>(
+        `select album_assets.album as id, min(albums.name) as name from album_assets
+         join albums on albums.id = album_assets.album and albums.account = album_assets.account
+         where album_assets.asset = ? group by album_assets.album order by album_assets.album`,
+      )
+      .all(asset);
   }
 
   countAssets(account?: string): number {
