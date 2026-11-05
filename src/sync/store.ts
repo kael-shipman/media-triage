@@ -385,6 +385,14 @@ export class SyncStore {
       .filter((path) => path.startsWith(prefix) && !/[./]/.test(path.slice(prefix.length)));
   }
 
+  /**
+   * Whether filing is putting a unit's state back on its new copies (src/filing/), so the reconcile holds its
+   * per-account state and named faces (DESIGN.md, section 7, "Holding the unit").
+   */
+  isBeingPutBack(path: string): boolean {
+    return this.db.query("select 1 from filings where destination = ? and status = 'restoring'").get(path) !== null;
+  }
+
   removeUnit(path: string): void {
     this.db.query("delete from units where path = ?").run(path);
   }

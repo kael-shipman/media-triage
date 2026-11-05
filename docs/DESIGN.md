@@ -383,6 +383,9 @@ copy in an account whose session isn't open isn't filed: that copy's state can't
 - **Videos' date:** they have no `DateTimeOriginal`. Use Immich's `localDateTime`, or the QuickTime dates with their
   offset.
 - **Extension:** kept as it is.
+- **Not filed, and reported:** a unit with no capture time, a unit whose archive folder is on another filesystem, and
+  a photo with Darktable duplicates (`<stem>_01.<ext>.xmp`): moving only its own sidecar would leave theirs as orphans,
+  which F11 would delete. (`src/filing/plan.ts`)
 
 **Moving:**
 - **The sidecar** moves with its file, renamed `<new name>.<ext>.xmp`.

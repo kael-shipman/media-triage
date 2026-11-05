@@ -81,6 +81,20 @@ const MIGRATIONS: readonly string[] = [
   // 5: orphan sidecars (F11): when the daemon saw a unit's media file gone, so its sidecar can be deleted once the
   // grace period is over.
   `alter table units add column gone text`,
+  // 6: filing (section 7, src/filing/): each unit filed or being filed, with its moves, planned before any of them is
+  // made, so an interrupted batch can be finished; the old copies; and how far it got.
+  `create table filings (
+    unit text primary key,
+    destination text not null,
+    moves text not null,
+    old_assets text not null,
+    status text not null,
+    created text not null,
+    updated text not null,
+    problem text
+  ) strict;
+  create index filings_destination on filings (destination);
+  create index filings_status on filings (status)`,
 ];
 
 /** The daemon's SQLite database, in the state folder. */

@@ -9,12 +9,12 @@ session stops partway. Each step ends with tests passing, the type check clean, 
 green.
 
 **Last updated:** 2026-11-04. Milestones 1–7 of 8 are done. **Milestone 8, filing** (DESIGN.md section 7) is
-planned below; step 1 is done, **next is step 2**.
+planned below; steps 1 and 2 are done, **next is step 3**.
 
 ## Working on it
 
 - **Bun 1.4** runs and builds it. Without Bun installed, `npx --yes bun@1.4.4` stands in for `bun`:
-  - `bun test`: the unit tests (377; 375 in CI, which skips the two that need Darktable), and the integration tests,
+  - `bun test`: the unit tests (386; 384 in CI, which skips the two that need Darktable), and the integration tests,
     skipped;
   - `bun run typecheck`: TypeScript, over `src/`, `scripts/` and `test/`;
   - `bun run build [version]`: executables for linux-x64 and linux-arm64 in `dist/` (`TARGETS=linux-x64` for one).
@@ -117,7 +117,10 @@ catching-up rule (`ReconcileContext.refreshing`).
    title, no copy trashed, not rejected (`xmp:Rating` -1), settled (every copy in step with the sidecar and not
    catching up, and nothing changed for `timing.settle`: the latest of the sidecar's mtime and the copies'
    `updatedAt`).
-2. **The plan** (pure): destinations for the media file, its sidecar, a Live Photo's video and its sidecar;
+2. [x] **The plan** (done 2026-11-04: `src/filing/plan.ts`, `planUnit`, looking at the disk only through `Disk`;
+   `src/filing/store.ts`, `FilingStore`; `SyncStore.isBeingPutBack` for the hold. A unit with Darktable duplicates'
+   sidecars isn't filed, and is reported: moving only the main sidecar would leave theirs as orphans, which F11 would
+   delete): destinations for the media file, its sidecar, a Live Photo's video and its sidecar;
    collisions across the batch and on disk; the date (the sidecar's, else Immich's `localDateTime`), the creator, the
    root (photos or videos). Migration 6: a `filings` table (the unit, its moves, its old assets, its status).
 3. **Moving:** remove `Promote` and `Promote/Needs a title` from the sidecar, record the plan, `link()` then

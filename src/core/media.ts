@@ -17,3 +17,11 @@ const VIDEOS = [
 
 /** Every extension Immich indexes, with its dot. */
 export const IMMICH_EXTENSIONS: readonly string[] = [...IMAGES, ...VIDEOS];
+
+const VIDEO_EXTENSIONS = new Set(VIDEOS);
+
+/** Whether Immich takes this file for a video, by its extension (ignoring case). */
+export function isVideo(name: string): boolean {
+  const dot = name.lastIndexOf(".");
+  return dot >= 0 && VIDEO_EXTENSIONS.has(name.slice(dot).toLowerCase());
+}
