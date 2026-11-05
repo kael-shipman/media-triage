@@ -8,8 +8,8 @@ you're about to build would change it, ask the author first.
 session stops partway. Each step ends with tests passing, the type check clean, a commit and a push; CI must stay
 green.
 
-**Last updated:** 2026-11-04. Milestones 1–7 of 8 are done. **Next: milestone 8, filing** (DESIGN.md section 7),
-below.
+**Last updated:** 2026-11-04. Milestones 1–7 of 8 are done. **Milestone 8, filing** (DESIGN.md section 7) is
+planned below; **next is step 1**.
 
 ## Working on it
 
@@ -106,17 +106,31 @@ These shape milestone 6; DESIGN.md has each.
 
 ## Next: milestone 8, filing
 
-DESIGN.md section 7 (`Promote`), and its "Putting back what Immich keeps per asset". Not planned in steps yet: read
-section 7 first, then write the steps here. What milestone 7 gives it:
-- each sidecar's `mediatriage:Accounts` (F9): favorites, visibility and albums to put back on the new copies;
-- the state's faces, deleted ones included (`SyncStore.facesOn`), for matching the old copy's faces to the new one's;
-- the reconcile's catching-up rule (`ReconcileContext.refreshing`), which filing's settle check should respect.
+DESIGN.md section 7 (`Promote`). Decided with the author (2026-11-04): while filing puts a unit's per-account state
+back, sync leaves it alone (DESIGN.md section 7, "Holding the unit"). What milestone 7 gives it: each sidecar's
+`mediatriage:Accounts` (F9); the state's faces, deleted ones included (`SyncStore.facesOn`); the reconcile's
+catching-up rule (`ReconcileContext.refreshing`).
 
-One question for the author before building: filing moves a unit, so the new copies appear with default favorites,
-visibility and albums, and the next reconcile would record those defaults over the sidecar's `Accounts` before
-filing has put them back. Filing has to hold the unit (or carry its record to the new path) until it has.
-
-Also worth doing before the first live run: a smoke test of the daemon with orphans and faces, as milestone 6's.
+1. **Readiness and `Promote/Needs a title`:** the reconcile adds `Promote/Needs a title` to an inbox unit tagged
+   `Promote` without a title, and removes it otherwise; `readiness` (pure, `src/core/filing.ts`): `Promote` and a
+   title, no copy trashed, not rejected (`xmp:Rating` -1), settled (every copy in step with the sidecar and not
+   catching up, and nothing changed for `timing.settle`: the latest of the sidecar's mtime and the copies'
+   `updatedAt`).
+2. **The plan** (pure): destinations for the media file, its sidecar, a Live Photo's video and its sidecar;
+   collisions across the batch and on disk; the date (the sidecar's, else Immich's `localDateTime`), the creator, the
+   root (photos or videos). Migration 6: a `filings` table (the unit, its moves, its old assets, its status).
+3. **Moving:** remove `Promote` and `Promote/Needs a title` from the sidecar, record the plan, `link()` then
+   `unlink()` each file (refusing other filesystems and existing names), carry the unit's record to the new path
+   (F10's made tags and regions with it), finish an interrupted batch at start, and ask Immich to scan the libraries
+   holding the old and new paths (admin session). The daemon's `filing` job runs every minute over inbox units tagged
+   `Promote`. A dry run logs the plan.
+4. **Putting back:** while a unit is being put back, the reconcile leaves its `Accounts` (F9), named-face tags and
+   regions (F10) alone. Once each account has its new copy: favorite, visibility and albums from the sidecar's
+   `Accounts`; then check that the old copies are offline or gone (`getAsset` only). A time limit, then a report.
+5. **Faces:** match the new copy's faces to the old copy's (IoU above 0.5, pure), wait for detection and recognition
+   (time limit), reassign, add the hand-made ones, delete the deleted ones; with `mirrors_face_corrections`, on one
+   copy only.
+6. **Smoke test** of the daemon filing a batch end to end against the development Immich; docs; milestone done.
 
 ## Milestone 7, F9–F11 (done 2026-11-04)
 

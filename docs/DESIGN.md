@@ -405,6 +405,18 @@ are in the sidecar, so they need nothing. The rest is restored once each account
   only. Otherwise a face added by hand would be added twice. Configurable.
 - **The old copies:** check that they end up offline or removed, using only calls that can't reach the disk.
 
+**Holding the unit** (decided with the author, 2026-11-04): the new copies arrive with default favorites, visibility
+and albums, and no faces until Immich detects them. Sync would record those in the sidecar over what filing is about
+to put back, and remove the named faces' tags and regions. So while a unit is being put back, the reconcile leaves its
+per-account state (F9) and its named faces' tags and regions (F10) as they are, and goes back to normal once filing is
+done with it.
+
+**How it runs** (`src/filing/`): a unit becomes ready only once it has been left alone for the settle time, and
+nothing else happens then to wake the daemon. So filing is a job of its own, every minute: it reconciles the inbox
+units tagged `Promote`, then files those that are ready. After moving a batch it asks Immich to scan the libraries
+holding the old and new paths (with the admin's session), since Immich notices neither the new files nor the old
+ones going until a scan.
+
 ## 8. Account upkeep
 
 Applied from configuration at start and on every full pass. Every step is idempotent, and nothing here deletes a file
