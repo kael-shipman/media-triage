@@ -9,6 +9,7 @@ import type { Config } from "../config.ts";
 import { PROMOTE_TAG } from "../core/naming.ts";
 import { PathMap } from "../core/path-map.ts";
 import { fileBatch, finishPlanned } from "../filing/file.ts";
+import { restorePending } from "../filing/restore.ts";
 import { FilingStore } from "../filing/store.ts";
 import { log } from "../log.ts";
 import type { RunResult } from "../scheduler.ts";
@@ -48,6 +49,8 @@ export class Sync {
   private filedBefore = false;
   /** The filing problems last logged, by unit, so each is logged when it first appears. */
   private filingProblems = new Map<string, string>();
+  /** What units being put back were last logged as waiting for. */
+  private restoreWaits = new Map<string, string>();
   /** Copies catching up after a refresh (src/sync/reconcile.ts). */
   private readonly refreshing = new Map<string, Refreshing>();
 
@@ -155,13 +158,19 @@ export class Sync {
 
   /**
    * The filing job (DESIGN.md, section 7): finishes plans a run left unfinished, then reconciles the inbox units tagged
-   * Promote, which says which are ready, and files those. Looks again sooner when a unit is only waiting out the settle
-   * time. Problems are logged when they first appear, not every run.
+   * Promote, which says which are ready, and files those; then puts back what Immich keeps per asset on units filed
+   * earlier, once their new copies are there. Looks again sooner when a unit is only waiting out the settle time.
+   * Problems, and what put-back units wait for, are logged when they first appear, not every run.
    */
   async file(): Promise<RunResult | void> {
     const { ctx } = await this.context();
     const finished = await finishPlanned(ctx, { retryProblems: !this.filedBefore });
     this.filedBefore = true;
+    const restored = await restorePending(ctx);
+    for (const { unit, problems } of restored.done) for (const problem of problems) log.warn("not all put back after filing", { unit, problem });
+    const waiting = new Map(restored.waiting.map(({ unit, why }) => [unit, why]));
+    for (const [unit, why] of waiting) if (this.restoreWaits.get(unit) !== why) log.info("putting back after filing: waiting", { unit, for: why });
+    this.restoreWaits = waiting;
     if (!this.config.paths.inbox || this.options.signal?.aborted) return;
     const sources = this.config.sources.map((source) => join(this.config.paths.inbox!, source.folder));
     const filings = new FilingStore(this.store.db);

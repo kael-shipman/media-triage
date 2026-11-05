@@ -418,6 +418,21 @@ are in the sidecar, so they need nothing. The rest is restored once each account
   only. Otherwise a face added by hand would be added twice. Configurable.
 - **The old copies:** check that they end up offline or removed, using only calls that can't reach the disk.
 
+**How it's put back** (`src/filing/restore.ts`, each run of the filing job, for each unit being put back):
+- **The new copies** are found by their path, in each account that had an old copy. One that's missing is waited for,
+  until Immich's library queue is idle and 2 minutes have passed since the move: an account's libraries may leave the
+  new path out (a date limit), and then its state can't be put back, which is reported.
+- **Faces first,** since waiting for them is what takes time: while the old copy had detected faces that have no match
+  on the new copy, or a match with no person yet, it waits (`src/core/face-match.ts`, `awaitingDetection`). Then
+  `faceActions`: reassign, add the hand-made faces, delete the deleted ones; a detected face with no match is
+  reported. The old copy's faces are its own account's, from the state.
+- **Favorite, visibility and albums** from the sidecar's `mediatriage:Accounts`, each on the new copy in the account
+  of that user ID. A locked visibility may need the account's PIN; if Immich refuses, it's reported.
+- **Every step looks first,** so running it again changes nothing that's already so.
+- **The old copies** must then be offline or gone (`getAsset`).
+- **Waiting is limited** to an hour after the move. Then it does what it can, and reports the rest. Either way the
+  unit is then released from the hold.
+
 **Holding the unit** (decided with the author, 2026-11-04): the new copies arrive with default favorites, visibility
 and albums, and no faces until Immich detects them. Sync would record those in the sidecar over what filing is about
 to put back, and remove the named faces' tags and regions. So while a unit is being put back, the reconcile leaves its
@@ -702,3 +717,4 @@ with what changed, not with the size of the archive.
   in Darktable.
 - 2026-11-04: F10 built: faces and people kept in the state from the streams, tags and regions from them.
 - 2026-11-04: F11 built: orphan sidecars deleted by the full pass, once seen gone for the grace period.
+- 2026-11-04: filing built (milestone 8, steps 1–5): readiness, the plan, moving, holding the unit, putting back.

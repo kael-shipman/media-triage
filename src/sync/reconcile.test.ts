@@ -6,6 +6,8 @@ import { FIXTURES, USERS, api, configFor, describeImmich, login, mediaFolder, ne
 import { PathMap } from "../core/path-map.ts";
 import { type AccountState, type XmpFields, darktableReads } from "../core/xmp.ts";
 import { fileBatch } from "../filing/file.ts";
+import { restorePending } from "../filing/restore.ts";
+import { FilingStore } from "../filing/store.ts";
 import { type Asset, getAsset } from "../immich/assets.ts";
 import { loginAccount } from "../immich/login.ts";
 import { Exiftool } from "../sidecars/exiftool.ts";
@@ -313,7 +315,7 @@ describeImmich("reconciling a unit with two accounts' copies", () => {
     expect((await readSidecar(exiftool, `${unit}.xmp`))!.fields.hierarchicalSubject).toContain("Promote|Needs a title");
   }, 180_000);
 
-  test("filing moves a ready unit into Pictures, Immich finds it there, and its state is held until it's put back", async () => {
+  test("filing moves a ready unit into Pictures, Immich finds it there, and its state is held, then put back", async () => {
     const { unit, folder, accounts, store, map, ctx, copy, settled, token } = await twoAccounts("filing", { inbox: true, admin: true });
     const tagsOf = (asset: Asset) => (asset.tags ?? []).map((tag) => tag.value).sort();
     const sync = async () => {
@@ -321,13 +323,26 @@ describeImmich("reconciling a unit with two accounts' copies", () => {
     };
     await sync();
 
-    // One favorites its copy, which the sidecar records (F9).
+    // One favorites its copy, puts it in an album and adds a face by hand; two archives its copy. The sidecar records
+    // their state (F9), and the state has the face.
     const old = { one: copy("one").id, two: copy("two").id };
-    await api("PUT", "/assets", { token: await token("one"), body: { ids: [old.one], isFavorite: true } });
-    await waitFor("the favorite in the sidecar", async () => {
-      await sync();
-      return (await readSidecar(exiftool, `${unit}.xmp`))!.fields.accounts?.[0]?.favorite ? true : undefined;
+    const [oneToken, twoToken] = [await token("one"), await token("two")];
+    await api("PUT", "/assets", { token: oneToken, body: { ids: [old.one], isFavorite: true } });
+    const album = await api<{ id: string }>("POST", "/albums", { token: oneToken, body: { albumName: "Lake trip", assetIds: [old.one] } });
+    await api("PUT", "/assets", { token: twoToken, body: { ids: [old.two], visibility: "archive" } });
+    const person = await api<{ id: string }>("POST", "/people", { token: oneToken, body: { name: "Kit Example" } });
+    const shown = (await getAsset(ctx.accounts.get("one")!.client, old.one))!;
+    const [width, height] = [shown.width ?? 0, shown.height ?? 0];
+    await api("POST", "/faces", {
+      token: oneToken,
+      body: { assetId: old.one, personId: person.id, imageWidth: width, imageHeight: height, x: width / 4, y: height / 4, width: width / 4, height: height / 4 },
     });
+    await waitFor("the state in the sidecar, and the face in the state", async () => {
+      await sync();
+      const entries = (await readSidecar(exiftool, `${unit}.xmp`))!.fields.accounts ?? [];
+      return entries.length === 2 && entries.some((entry) => entry.albums.length === 1) && store.facesOn(old.one).length === 1 ? true : undefined;
+    });
+    const before = (await readSidecar(exiftool, `${unit}.xmp`))!.fields.accounts;
 
     // Tagged Promote in Darktable; ready once both copies have read it.
     const sidecar = (await readSidecar(exiftool, `${unit}.xmp`))!;
@@ -364,8 +379,21 @@ describeImmich("reconciling a unit with two accounts' copies", () => {
     // Held: the new copies aren't favorites yet, but the sidecar keeps what filing will put back.
     await sync();
     await reconcile(ctx, [destination]);
-    expect((await readSidecar(exiftool, `${destination}.xmp`))!.fields.accounts).toEqual([
-      { user: ctx.accounts.get("one")!.userId, favorite: true, visibility: "timeline", albums: [] },
-    ]);
+    expect((await readSidecar(exiftool, `${destination}.xmp`))!.fields.accounts).toEqual(before);
+
+    // Put back: each account's state on its new copy, and the face added by hand. Then the hold is released.
+    const restored = await waitFor("the unit put back", async () => {
+      const report = await restorePending(ctx);
+      return report.done.length > 0 ? report.done : undefined;
+    }, 60_000);
+    expect(restored).toEqual([{ unit, problems: [] }]);
+    const [one, two] = ["one", "two"].map((name) => fresh.find((record) => record.account === name)!.id);
+    const putBack = (await getAsset(ctx.accounts.get("one")!.client, one!))!;
+    expect(putBack.isFavorite).toBe(true);
+    expect(String((await getAsset(ctx.accounts.get("two")!.client, two!))!.visibility)).toBe("archive");
+    expect((await api<{ id: string }[]>("GET", `/albums?assetId=${one}`, { token: oneToken })).map((each) => each.id)).toEqual([album.id]);
+    expect((await api<{ person: { id: string } | null }[]>("GET", `/faces?id=${one}`, { token: oneToken })).map((face) => face.person?.id)).toEqual([person.id]);
+    expect(store.isBeingPutBack(destination)).toBe(false);
+    expect(new FilingStore(state.db).get(unit)?.status).toBe("done");
   }, 180_000);
 });
