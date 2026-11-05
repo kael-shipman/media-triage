@@ -51,6 +51,33 @@ const MIGRATIONS: readonly string[] = [
   ) strict;
   create index album_assets_asset on album_assets (asset);
   create index album_assets_album on album_assets (album)`,
+  // 4: named faces (F10): every face on every asset in the accounts' cluster group, with its person (the person
+  // group's ID) and box, and each account's own record of each person, with its name. Stale as in 3.
+  `create table faces (
+    id text primary key,
+    asset text not null,
+    person text,
+    x1 real not null,
+    y1 real not null,
+    x2 real not null,
+    y2 real not null,
+    width integer not null,
+    height integer not null,
+    source text not null,
+    visible integer not null,
+    deleted text,
+    stale integer not null default 0
+  ) strict;
+  create index faces_asset on faces (asset);
+  create index faces_person on faces (person);
+  create table people (
+    account text not null,
+    id text not null,
+    name text not null,
+    hidden integer not null,
+    stale integer not null default 0,
+    primary key (account, id)
+  ) strict`,
 ];
 
 /** The daemon's SQLite database, in the state folder. */

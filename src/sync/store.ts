@@ -7,15 +7,19 @@
 // - Albums: each account's albums and their assets, as its stream reports them, for each copy's album memberships
 //   (F9). Album IDs are the server's, but access is each account's: an account that loses access to an album is told
 //   so on its own stream only.
+// - Faces and people (F10): every face on every asset in the cluster group, which each account's stream reports, and
+//   each account's own record of each person (the person group's ID), with its name. Filing will need an old copy's
+//   faces, deleted ones included, after its file has moved.
 //
 // After a reset of an account's stream, what it reported before is kept but marked stale, and each row it sends again
-// is fresh. Once the stream has been read whole, what's still stale is gone (`sweep`). So a reset doesn't empty the
+// is fresh. (Faces are the whole cluster group's, so a reset of any account marks them all.) Once the stream has been read whole, what's still stale is gone (`sweep`). So a reset doesn't empty the
 // albums until they're sent again, which would rewrite every sidecar twice.
 //
 // Every write is one transaction.
 
 import type { Database } from "bun:sqlite";
 import type { Base } from "../core/merge.ts";
+import type { Area, FaceBox } from "../core/regions.ts";
 import type { FileStamp } from "../sidecars/sidecar.ts";
 
 export interface AssetRecord {
@@ -42,10 +46,36 @@ export interface AlbumRef {
   name: string;
 }
 
+/** A face, as the sync stream reports it (`SyncAssetFaceV3`): a box in pixels of the image as shown. */
+export interface FaceRecord extends FaceBox {
+  id: string;
+  asset: string;
+  /** The person group's ID, or null for a face no one is assigned to. */
+  person: string | null;
+  /** "machine-learning", "exif" or "manual". */
+  source: string;
+  visible: boolean;
+  /** When it was deleted (a soft delete), or null. */
+  deleted: string | null;
+}
+
+/** An account's own record of a person. */
+export interface PersonRecord {
+  account: string;
+  /** The person group's ID: the same in every account of the cluster group. */
+  id: string;
+  name: string;
+  hidden: boolean;
+}
+
 /** The values a unit last had everywhere: the base the next merge compares each side with (src/core/merge.ts). */
 export interface SyncedValues extends Base {
   title: string | null;
   creator: string | null;
+  /** The `People/…` tags the daemon made from faces (F10); others are hand made, and never removed. */
+  people?: string[];
+  /** The face regions the daemon made (F10), so they can be told from other tools' regions. */
+  regions?: { name: string; area: Area }[];
 }
 
 export interface UnitRecord {
@@ -78,6 +108,36 @@ interface UnitRow {
   synced: string;
   updated: string;
 }
+
+interface FaceRow {
+  id: string;
+  asset: string;
+  person: string | null;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  width: number;
+  height: number;
+  source: string;
+  visible: number;
+  deleted: string | null;
+}
+
+const toFace = (row: FaceRow): FaceRecord => ({
+  id: row.id,
+  asset: row.asset,
+  person: row.person,
+  boundingBoxX1: row.x1,
+  boundingBoxY1: row.y1,
+  boundingBoxX2: row.x2,
+  boundingBoxY2: row.y2,
+  imageWidth: row.width,
+  imageHeight: row.height,
+  source: row.source,
+  visible: row.visible === 1,
+  deleted: row.deleted,
+});
 
 const toAsset = (row: AssetRow): AssetRecord => ({ ...row, trashed: row.trashed === 1, favorite: row.favorite === 1 });
 
@@ -158,13 +218,15 @@ export class SyncStore {
       this.db.query("delete from assets where account = ?").run(account);
       this.db.query("update albums set stale = 1 where account = ?").run(account);
       this.db.query("update album_assets set stale = 1 where account = ?").run(account);
+      this.db.query("update people set stale = 1 where account = ?").run(account);
+      this.db.query("update faces set stale = 1").run();
       this.db.query("insert into kv (key, value) values (?, '1') on conflict (key) do update set value = excluded.value").run(sweepKey(account));
     })();
   }
 
   /**
    * Once an account's stream has been read whole after a reset: forgets what it didn't send again, since that's gone.
-   * Returns the assets whose albums changed, or undefined when there was no reset to finish.
+   * Returns the assets whose albums or faces changed, or undefined when there was no reset to finish.
    */
   sweep(account: string): string[] | undefined {
     if (!this.db.query("select 1 from kv where key = ?").get(sweepKey(account))) return undefined;
@@ -179,6 +241,17 @@ export class SyncStore {
       this.db.query("delete from album_assets where account = ? and stale = 1").run(account);
       this.db.query("delete from album_assets where account = ? and album in (select id from albums where account = ? and stale = 1)").run(account, account);
       this.db.query("delete from albums where account = ? and stale = 1").run(account);
+      assets.push(
+        ...this.db
+          .query<{ asset: string }, [string]>(
+            `select asset from faces where stale = 1
+             union select asset from faces where person in (select id from people where account = ? and stale = 1)`,
+          )
+          .all(account)
+          .map((row) => row.asset),
+      );
+      this.db.query("delete from faces where stale = 1").run();
+      this.db.query("delete from people where account = ? and stale = 1").run(account);
       this.db.query("delete from kv where key = ?").run(sweepKey(account));
       return [...new Set(assets)];
     })();
@@ -281,5 +354,92 @@ export class SyncStore {
 
   removeUnit(path: string): void {
     this.db.query("delete from units where path = ?").run(path);
+  }
+
+  // Faces and people (F10).
+
+  /** Adds or replaces faces. */
+  putFaces(faces: readonly FaceRecord[]): void {
+    const insert = this.db.query(
+      `insert into faces (id, asset, person, x1, y1, x2, y2, width, height, source, visible, deleted, stale)
+       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+       on conflict (id) do update set asset = excluded.asset, person = excluded.person, x1 = excluded.x1,
+         y1 = excluded.y1, x2 = excluded.x2, y2 = excluded.y2, width = excluded.width, height = excluded.height,
+         source = excluded.source, visible = excluded.visible, deleted = excluded.deleted, stale = 0`,
+    );
+    this.db.transaction(() => {
+      for (const face of faces) {
+        insert.run(
+          face.id,
+          face.asset,
+          face.person,
+          face.boundingBoxX1,
+          face.boundingBoxY1,
+          face.boundingBoxX2,
+          face.boundingBoxY2,
+          face.imageWidth,
+          face.imageHeight,
+          face.source,
+          face.visible ? 1 : 0,
+          face.deleted,
+        );
+      }
+    })();
+  }
+
+  /** Forgets faces Immich deleted for good. Returns the assets they were on. */
+  removeFaces(ids: readonly string[]): string[] {
+    const find = this.db.query<{ asset: string }, [string]>("select asset from faces where id = ?");
+    const remove = this.db.query("delete from faces where id = ?");
+    return this.db.transaction(() => {
+      const assets = new Set<string>();
+      for (const id of ids) {
+        const row = find.get(id);
+        if (row) assets.add(row.asset);
+        remove.run(id);
+      }
+      return [...assets];
+    })();
+  }
+
+  /** The faces on an asset, deleted ones included, in a stable order. */
+  facesOn(asset: string): FaceRecord[] {
+    return this.db.query<FaceRow, [string]>("select * from faces where asset = ? order by id").all(asset).map(toFace);
+  }
+
+  /** The assets with a face of this person. */
+  assetsWithPerson(person: string): string[] {
+    return this.db.query<{ asset: string }, [string]>("select distinct asset from faces where person = ? order by asset").all(person).map((row) => row.asset);
+  }
+
+  /**
+   * Adds or replaces an account's records of people. Returns the IDs of those that are new, or whose name or hidden
+   * changed: their faces' sidecars change.
+   */
+  putPeople(people: readonly PersonRecord[]): string[] {
+    const current = this.db.query<{ name: string; hidden: number }, [string, string]>("select name, hidden from people where account = ? and id = ?");
+    const insert = this.db.query(
+      `insert into people (account, id, name, hidden, stale) values (?, ?, ?, ?, 0)
+       on conflict (account, id) do update set name = excluded.name, hidden = excluded.hidden, stale = 0`,
+    );
+    return this.db.transaction(() => {
+      const changed: string[] = [];
+      for (const person of people) {
+        const before = current.get(person.account, person.id);
+        if (!before || before.name !== person.name || (before.hidden === 1) !== person.hidden) changed.push(person.id);
+        insert.run(person.account, person.id, person.name, person.hidden ? 1 : 0);
+      }
+      return changed;
+    })();
+  }
+
+  removePerson(account: string, id: string): void {
+    this.db.query("delete from people where account = ? and id = ?").run(account, id);
+  }
+
+  /** An account's own record of a person. */
+  person(account: string, id: string): PersonRecord | undefined {
+    const row = this.db.query<{ name: string; hidden: number }, [string, string]>("select name, hidden from people where account = ? and id = ?").get(account, id);
+    return row ? { account, id, name: row.name, hidden: row.hidden === 1 } : undefined;
   }
 }

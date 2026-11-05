@@ -8,13 +8,13 @@ you're about to build would change it, ask the author first.
 session stops partway. Each step ends with tests passing, the type check clean, a commit and a push; CI must stay
 green.
 
-**Last updated:** 2026-11-04. Milestones 1–6 of 8 are done. **Milestone 7** (F9–F11) is under way: F9 and a race fix
-are done; **next is step 3, F10**, below.
+**Last updated:** 2026-11-04. Milestones 1–6 of 8 are done. **Milestone 7** (F9–F11) is under way: F9, a race fix and
+F10 are done; **next is step 4, F11**, below.
 
 ## Working on it
 
 - **Bun 1.4** runs and builds it. Without Bun installed, `npx --yes bun@1.4.4` stands in for `bun`:
-  - `bun test`: the unit tests (358; 356 in CI, which skips the two that need Darktable), and the integration tests,
+  - `bun test`: the unit tests (364; 362 in CI, which skips the two that need Darktable), and the integration tests,
     skipped;
   - `bun run typecheck`: TypeScript, over `src/`, `scripts/` and `test/`;
   - `bun run build [version]`: executables for linux-x64 and linux-arm64 in `dist/` (`TARGETS=linux-x64` for one).
@@ -22,7 +22,7 @@ are done; **next is step 3, F10**, below.
   `127.0.0.1:2284`, with made-up users (`alex@example.com`, the admin, and `sam@example.com`).
   - `bun run immich up` starts it (about a minute) and `bun run immich down` deletes everything. Leave it down when
     you stop: its database is in memory anyway.
-  - `MEDIA_TRIAGE_IMMICH_TESTS=1 bun test` runs everything against it (403 tests). Run it twice in a row on one
+  - `MEDIA_TRIAGE_IMMICH_TESTS=1 bun test` runs everything against it (411 tests). Run it twice in a row on one
     instance before calling a step done: tests must not depend on what other tests left behind.
   - Shared test helpers are in `test/immich/harness.ts`: `describeImmich`, `mediaFolder`, `photos`,
     `indexedLibrary`, `newUser` (fresh users, for anything that changes an account for good, such as joining a
@@ -55,9 +55,10 @@ are done; **next is step 3, F10**, below.
 | The merge (`mergeUnit`) | `src/core/merge.ts` | 6 |
 | Sync: state (`SyncStore`), covered folders, the watcher, the full pass, each account's stream, the reconcile, the daemon's jobs | `src/sync/` | 6 |
 | Per-account state (F9): favorites, visibility and albums, from each copy and the stream's albums | `src/sync/reconcile.ts` (`accountStates`), `store.ts`, `stream.ts` | 7 |
+| Named faces (F10): faces and people from the streams, `People/<name>` tags and regions | `src/core/faces.ts`, `src/sync/reconcile.ts` (`namedFaces`), `store.ts`, `stream.ts` | 7 |
 
-**The daemon's jobs:** account upkeep and the check, the full pass and sync (F1–F9 without F5), and the upgrade check.
-Nothing files yet, and named faces and orphans aren't synced yet.
+**The daemon's jobs:** account upkeep and the check, the full pass and sync (F1–F10 without F5), and the upgrade check.
+Nothing files yet, and orphan sidecars aren't handled yet.
 
 **Found in Immich 3.3.5 while building milestones 3 and 4** (each is in DESIGN.md, and each has a test):
 - the sync stream refuses `AssetsV1` (use `AssetsV2`), carries no paths, and `AssetFacesV3` covers the whole cluster
@@ -119,20 +120,15 @@ faces' events without acting on them yet (`src/sync/stream.ts`, `assetOf`).
    development Immich). Now a copy asked to refresh isn't a side for the sidecar's values until it catches up
    (`isCatchingUp` in `src/sync/reconcile.ts`, DESIGN.md section 5; `ReconcileContext.refreshing`, held by the `Sync`
    job). Test: "a tag removed in Darktable stays removed…" in `reconcile.test.ts`.
-3. **F10, named faces:** `AssetFaceV3` (faces on every asset in the cluster group; `personId` is the person group's)
-   and `PersonV1` (each account's own records, with its own name and `isHidden`) into `People|<name>` tags and regions
-   (`regionFromFace`, with `exifInfo.orientation`). Plan, from Immich 3.3.5's source (`sync.repository.ts`,
-   `asset-response.dto.ts`):
-   - `getAsset`'s `people` have no face boxes, so keep the faces in the store (migration 4: `faces`, keyed by face ID,
-     with asset, person, box, image size, source, `isVisible`, `deletedAt`; `people` per account: name, hidden; both
-     with `stale`, swept like albums). Filing (milestone 8) needs the old copy's faces from the state anyway.
-   - Face events for assets the store doesn't know aren't learned: each account's own stream reports its assets.
-   - A `PersonV1` rename reconciles every unit with a face of that person.
-   - Counted: visible, undeleted faces whose person the copy's account names and doesn't hide (any copy). The tag is
-     `People/<name>` with any `/` in the name as `|` (F4's translation). Regions for photos only, each person's faces
-     from the first copy (by account) that has them, so twins don't double them.
-   - The state (`SyncedValues`) records the tags and regions the daemon made: a `People/…` tag already there is hand
-     made and never removed; a made one goes when its face does.
+3. [x] **F10, named faces** (done 2026-11-04): migration 4 (`faces`, keyed by face ID, the whole cluster group's,
+   with the person group's ID and box, `isVisible`, `deletedAt`; `people` per account: name, hidden; both stale and
+   swept like albums); the stream records them (`recordAlbumsAndFaces`) and reconciles every unit with a face of a
+   person renamed, hidden, shown or deleted; `applyFaces` (`src/core/faces.ts`) adds `People/<name>` tags (a `/` in a
+   name as `|`) and, for photos, regions, from `namedFaces` (each person's faces from the first copy that has them).
+   The unit's record keeps the tags and regions the daemon made (`SyncedValues.people`, `regions`): a tag already
+   there is hand made and stays; other tools' regions stay. Tested end to end with a face added by hand, a rename and
+   a deleted face (`reconcile.test.ts`, F10). Not covered: Immich's recognition (the development Immich has no machine
+   learning).
 4. **F11, orphan sidecars:** `src/core/orphans.ts` has the rules; the full pass sees media go. Seen, then gone for the
    grace period (1 h): delete; never seen: report; conflict copies: report.
 5. **Not done in milestone 6, worth doing:** removing GPS or a date when a side drops one (now ignored, so nothing is

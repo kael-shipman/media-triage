@@ -13,6 +13,7 @@
 
 import { join } from "node:path";
 import type { Config } from "../config.ts";
+import { type FacesOutcome, type NamedFace, applyFaces } from "../core/faces.ts";
 import { type Base, type Side, type SideValues, mergeUnit, normalizeDescription, normalizeRating } from "../core/merge.ts";
 import { isDarktableInternalInImmich, sameTags } from "../core/tags.ts";
 import { withTitle } from "../core/titles.ts";
@@ -125,6 +126,28 @@ export function accountStates(
     known.set(record.owner, state);
   }
   return [...current.filter((entry) => !known.has(entry.user)), ...known.values()];
+}
+
+/**
+ * The named faces on a unit's copies (F10), from the store: visible faces that aren't deleted, whose person the copy's
+ * account names and doesn't hide. Each person's faces come from the first copy that has them, so copies that are twins
+ * don't show each face twice.
+ */
+export function namedFaces(store: SyncStore, records: readonly AssetRecord[]): NamedFace[] {
+  const chosen = new Map<string, string>();
+  const faces: NamedFace[] = [];
+  for (const record of records) {
+    for (const face of store.facesOn(record.id)) {
+      if (!face.visible || face.deleted !== null || face.person === null) continue;
+      const from = chosen.get(face.person);
+      if (from !== undefined && from !== record.id) continue;
+      const person = store.person(record.account, face.person);
+      if (!person || person.name.trim() === "" || person.hidden) continue;
+      chosen.set(face.person, record.id);
+      faces.push({ person: face.person, name: person.name, face });
+    }
+  }
+  return faces;
 }
 
 /** Whether a copy holds what Immich would read from the sidecar, so a refresh would change nothing. */
@@ -277,6 +300,24 @@ async function reconcileUnit(
   }
   const { merged } = result;
 
+  // F10: named faces' tags and, for photos, regions, one way from Immich's faces, from every copy the store knows (the
+  // faces and names are the store's, so no session is needed). A unit with no copy at all is left as it is.
+  let faces: FacesOutcome | undefined;
+  const allRecords = store.assetsAt(unit);
+  if (fields && allRecords.length > 0) {
+    const shown = copies[0]?.asset;
+    const orientation = Number(shown?.exifInfo?.orientation ?? undefined);
+    faces = applyFaces({
+      tags: merged.tags,
+      faces: namedFaces(store, allRecords),
+      photo: shown?.type === "IMAGE",
+      orientation: Number.isFinite(orientation) ? orientation : undefined,
+      regions: fields.regions,
+      made: { tags: previous?.synced.people ?? [], regions: previous?.synced.regions ?? [] },
+    });
+    merged.tags = faces.tags;
+  }
+
   // 3. Write the sidecar's changed fields, if the file is still as it was read.
   let stamp = sidecar?.stamp;
   if (fields) {
@@ -290,6 +331,7 @@ async function reconcileUnit(
     if (merged.gps !== null) wanted.gps = merged.gps;
     if (source && !fields.creator?.length) wanted.creator = source.creator;
     wanted.accounts = accountStates(store, records, new Map(copies.map((copy) => [copy.asset.id, copy.asset])), fields.accounts ?? []);
+    if (faces?.regions) wanted.regions = faces.regions;
     if (sidecar) {
       const outcome = await writeSidecar(exiftool, sidecar, wanted, { dryRun });
       if (outcome.status === "changed-meanwhile") {
@@ -317,7 +359,12 @@ async function reconcileUnit(
   // 5. Record what every side now says, with the sidecar's stamp, so the daemon's own writes aren't acted on again.
   if (!dryRun) {
     const { from: _, ...values } = merged;
-    const synced: SyncedValues = { ...values, creator: fields?.creator?.[0] ?? null };
+    const synced: SyncedValues = {
+      ...values,
+      creator: fields?.creator?.[0] ?? null,
+      people: faces?.madeTags ?? previous?.synced.people ?? [],
+      regions: faces?.madeRegions ?? previous?.synced.regions ?? [],
+    };
     store.putUnits([{ path: unit, ...(stamp ? { sidecar: stamp } : {}), synced, updated: new Date().toISOString() }]);
   }
 }

@@ -104,7 +104,7 @@ video. Units in the archive count as much as units in the inbox (section 1).
    reset, or when its last completed sync is more than 30 days old (`sync.service.ts`, `needsFullSync`), since older
    changes may have left its audit tables. The daemon acknowledges the reset, which clears the session's checkpoints,
    reads the whole account again as on a first run, and logs it. What the account's stream reported before (its
-   albums) is kept, marked stale, until the stream sends it again; once the stream has been read whole, what's still
+   albums and people, and the cluster group's faces) is kept, marked stale, until the stream sends it again; once the stream has been read whole, what's still
    stale is gone, and its units are reconciled. Emptying it at the reset would rewrite those sidecars twice.
 
    Tags have no sync type. A tag change reaches the daemon as Immich's own sidecar write (point 1), and the merge
@@ -176,8 +176,8 @@ If the state is lost, merge as a union, which never drops a tag, and report it.
   now (an edit in Immich rewrites the sidecar), or once its `updatedAt` changed at least 2 seconds earlier (metadata
   extraction updates the asset; its tags are replaced in a parallel step). After an hour it counts again, with a
   warning. This is kept in memory: a restart forgets it.
-- **Not yet:** removing GPS or a date (a side that drops one isn't acted on, so nothing is lost), and named faces and
-  orphans (milestone 7).
+- **Not yet:** removing GPS or a date (a side that drops one isn't acted on, so nothing is lost), and orphans
+  (milestone 7).
 - **In the daemon** (`src/sync/job.ts`): the full pass at start and daily; the `sync` job each minute and after every
   change the watcher sees, reading each account's stream (a batch is reconciled before it's acknowledged), then up to
   200 units that have been quiet for 2 seconds, so a first run over the whole archive doesn't hold up other jobs.
@@ -312,6 +312,20 @@ If the state is lost, merge as a union, which never drops a tag, and report it.
     refresh deletes and recreates the faces read from regions (`metadata.service.ts`, `applyTaggedFaces`), and the
     daemon refreshes often.
   - **Cost:** naming a person rewrites the sidecar of every photo they're in, and each rewrite syncs to every machine.
+
+  How it's built (`src/core/faces.ts`; `namedFaces` in `src/sync/reconcile.ts`):
+  - **From the state, not the API:** `GET /api/assets/{id}` lists an asset's people but not their faces' boxes. So the
+    state keeps every face the streams report (`AssetFaceV3`, the whole cluster group's: the person group's ID, the
+    box, `isVisible`, `deletedAt`) and each account's own record of each person (`PersonV1`: its name and `isHidden`).
+    Filing needs the old copy's faces from the state anyway (section 7). A new face, a rename, hiding or showing a
+    person, or a deleted person reconciles every unit with a face of theirs.
+  - **Who counts:** a face that's visible and not deleted, whose person the copy's account names and doesn't hide.
+    Each person's faces come from the first copy that has them, so copies sharing their faces (the fork's twins) don't
+    double the regions.
+  - **The tag** is `People/<name>`, with a `/` in the name written `|` (F4's translation), so it doesn't nest.
+  - **The daemon's regions** are told from other tools' by the state (each one's name and area), and made again from
+    the faces each time; other tools' are kept as they were read.
+  - **Left alone:** a unit with no copy the state knows, and a unit without a sidecar.
 - **F11. Orphan sidecars.** A sidecar whose media file is gone is deleted, with these safeguards:
   - **Which file it belongs to:** a Darktable duplicate's sidecar (`<stem>_01.<ext>.xmp`) belongs to `<stem>.<ext>`,
     and a `<stem>.xmp` sidecar to any `<stem>.*`.
@@ -635,7 +649,8 @@ with what changed, not with the size of the archive.
   (F6), Darktable dropping the date's offset (F6), Immich showing Darktable's own tags (F4), and how regions'
   coordinates relate to Immich's faces (F10). Checked that Immich and Darktable keep the namespace and regions (F9,
   F10). F9's namespace and its key settled. The author decided F5 isn't needed.
-- 2026-11-04: a copy catching up after a refresh isn't a side (section 5): found in testing, it undid a tag removed
-  in Darktable.
 - 2026-11-04: F9 built: each account's state, from its copies and its stream's albums; a reset keeps what the stream
   reported, stale, until it's sent again. Assets are recorded with their owner's account only.
+- 2026-11-04: a copy catching up after a refresh isn't a side (section 5): found in testing, it undid a tag removed
+  in Darktable.
+- 2026-11-04: F10 built: faces and people kept in the state from the streams, tags and regions from them.

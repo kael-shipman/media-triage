@@ -7,7 +7,7 @@ import { acknowledge, type SyncEvent, syncStream } from "../immich/sync.ts";
 import type { PathMap } from "../core/path-map.ts";
 import { log } from "../log.ts";
 import type { OpenAccount } from "../upkeep/accounts.ts";
-import type { AssetRecord, SyncStore } from "./store.ts";
+import type { AssetRecord, FaceRecord, SyncStore } from "./store.ts";
 
 /** Past this many unknown assets in a batch, their libraries are listed whole rather than each asset read alone. */
 export const BULK_LOOKUP = 50;
@@ -29,7 +29,7 @@ export interface StreamOutcome {
   reset: boolean;
 }
 
-/** The asset events that can change what a unit should say. Faces and people are handled by `consumeStream`. */
+/** The asset events that can change what a unit should say. Faces and people are handled by `recordAlbumsAndFaces`. */
 function assetOf(event: SyncEvent): string | undefined {
   switch (event.type) {
     case "AssetV2":
@@ -140,8 +140,9 @@ export async function consumeStream(account: OpenAccount, store: SyncStore, map:
     await learnAssets(account, store, map, [...unknown].map(([id, library]) => ({ id, library })), options.bulkLookup);
     store.updateAssets(changes);
 
-    // Albums (F9): a rename or a lost album changes every sidecar that names it.
-    const touched = recordAlbums(account.account.name, store, batch.events);
+    // Albums (F9), faces and people (F10): a renamed or lost album, or a renamed or hidden person, changes every
+    // sidecar that names them.
+    const touched = recordAlbumsAndFaces(account.account.name, store, batch.events);
     if (batch.complete) touched.push(...(store.sweep(account.account.name) ?? []));
 
     // The units those assets belong to, here. Deleted assets' units are acted on too: their copy is gone.
@@ -158,11 +159,52 @@ export async function consumeStream(account: OpenAccount, store: SyncStore, map:
   return outcome;
 }
 
-/** Records a batch's album events, in order. Returns the assets in albums that were renamed or are gone. */
-function recordAlbums(account: string, store: SyncStore, events: readonly SyncEvent[]): string[] {
+/**
+ * Records a batch's album, people and face events, in order. Returns the assets they change: those in albums renamed
+ * or gone, with faces of people renamed, hidden, shown or gone, and those whose faces changed. Faces come many at a
+ * time on a first run, so consecutive ones are recorded together.
+ */
+function recordAlbumsAndFaces(account: string, store: SyncStore, events: readonly SyncEvent[]): string[] {
   const touched: string[] = [];
+  let faces: FaceRecord[] = [];
+  const flushFaces = () => {
+    store.putFaces(faces);
+    faces = [];
+  };
   for (const event of events) {
+    if (event.type !== "AssetFaceV3" && faces.length > 0) flushFaces();
     switch (event.type) {
+      case "AssetFaceV3": {
+        const face = event.data;
+        faces.push({
+          id: face.id,
+          asset: face.assetId,
+          person: face.personId,
+          boundingBoxX1: face.boundingBoxX1,
+          boundingBoxY1: face.boundingBoxY1,
+          boundingBoxX2: face.boundingBoxX2,
+          boundingBoxY2: face.boundingBoxY2,
+          imageWidth: face.imageWidth,
+          imageHeight: face.imageHeight,
+          source: face.sourceType,
+          visible: face.isVisible,
+          deleted: face.deletedAt,
+        });
+        touched.push(face.assetId);
+        break;
+      }
+      case "AssetFaceDeleteV1":
+        touched.push(...store.removeFaces([event.data.assetFaceId]));
+        break;
+      case "PersonV1":
+        for (const id of store.putPeople([{ account, id: event.data.id, name: event.data.name, hidden: event.data.isHidden }])) {
+          touched.push(...store.assetsWithPerson(id));
+        }
+        break;
+      case "PersonDeleteV1":
+        touched.push(...store.assetsWithPerson(event.data.personId));
+        store.removePerson(account, event.data.personId);
+        break;
       case "AlbumV2":
         for (const album of store.putAlbums(account, [{ id: event.data.id, name: event.data.name }])) touched.push(...store.albumAssets(album));
         break;
@@ -178,5 +220,6 @@ function recordAlbums(account: string, store: SyncStore, events: readonly SyncEv
         break;
     }
   }
+  flushFaces();
   return touched;
 }

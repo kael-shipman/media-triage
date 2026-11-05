@@ -201,4 +201,48 @@ describeImmich("reconciling a unit with two accounts' copies", () => {
     await reconcile(ctx, [unit]);
     expect((await readSidecar(exiftool, `${unit}.xmp`))!.fields.hierarchicalSubject).not.toContain("Places|Lake");
   }, 180_000);
+
+  test("a named face becomes a tag and a region; a rename and a deleted face follow; a hand-made tag stays (F10)", async () => {
+    const { accounts, unit, store, map, ctx, copy, read, token } = await twoAccounts("faces");
+    const sync = async () => {
+      for (const account of accounts) await consumeStream(account, store, map, { act: async (units) => void (await reconcile(ctx, units)) });
+    };
+    const sidecar = async () => (await readSidecar(exiftool, `${unit}.xmp`))!.fields;
+    await sync();
+
+    // A face added by hand in account one, for a new person. The fixture's sidecar already has a hand-made tag,
+    // People|Robin Example.
+    const oneToken = await token("one");
+    const person = await api<{ id: string }>("POST", "/people", { token: oneToken, body: { name: "Kit Example" } });
+    const asset = await read("one");
+    const [width, height] = [asset.width ?? 0, asset.height ?? 0];
+    await api("POST", "/faces", {
+      token: oneToken,
+      body: { assetId: copy("one").id, personId: person.id, imageWidth: width, imageHeight: height, x: width / 4, y: height / 4, width: width / 4, height: height / 4 },
+    });
+    await sync();
+    let fields = await sidecar();
+    expect(fields.hierarchicalSubject).toEqual(expect.arrayContaining(["People|Kit Example", "People|Robin Example"]));
+    const region = fields.regions?.regions.find((each) => each.name === "Kit Example");
+    expect(region?.type).toBe("Face");
+    expect(region?.area?.x).toBeCloseTo(0.375, 2);
+    expect(region?.area?.w).toBeCloseTo(0.25, 2);
+
+    // A rename: the tag and region follow.
+    await api("PUT", `/people/${person.id}`, { token: oneToken, body: { name: "Kit Renamed" } });
+    await sync();
+    fields = await sidecar();
+    expect(fields.hierarchicalSubject).toContain("People|Kit Renamed");
+    expect(fields.hierarchicalSubject).not.toContain("People|Kit Example");
+    expect(fields.regions?.regions.map((each) => each.name)).toEqual(["Kit Renamed"]);
+
+    // The face is deleted: the daemon's tag and region go; the hand-made tag stays.
+    const faces = await api<{ id: string }[]>("GET", `/faces?id=${copy("one").id}`, { token: oneToken });
+    for (const face of faces) await api("DELETE", `/faces/${face.id}`, { token: oneToken, body: { force: false } });
+    await sync();
+    fields = await sidecar();
+    expect(fields.hierarchicalSubject).not.toContain("People|Kit Renamed");
+    expect(fields.hierarchicalSubject).toContain("People|Robin Example");
+    expect(fields.regions).toBeUndefined();
+  }, 180_000);
 });

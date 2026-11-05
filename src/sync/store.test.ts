@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { State } from "../state.ts";
-import { type AssetRecord, SyncStore, type UnitRecord } from "./store.ts";
+import { type AssetRecord, type FaceRecord, SyncStore, type UnitRecord } from "./store.ts";
 
 let dir: string;
 let state: State;
@@ -86,6 +86,48 @@ test("a reset keeps albums, stale, until the stream has sent them again; what it
   expect(store.albumAssets("kept")).toEqual(["a1", "s1"]);
   expect(store.albumsOf("a3")).toEqual([]);
   expect(store.sweep("alex")).toBeUndefined();
+});
+
+const face = (id: string, asset: string, person: string | null): FaceRecord => ({
+  id,
+  asset,
+  person,
+  boundingBoxX1: 10,
+  boundingBoxY1: 20,
+  boundingBoxX2: 110,
+  boundingBoxY2: 140,
+  imageWidth: 1000,
+  imageHeight: 800,
+  source: "machine-learning",
+  visible: true,
+  deleted: null,
+});
+
+test("faces and people: faces by asset and by person, people's changes reported, and a reset's sweep", () => {
+  store.putFaces([face("f1", "a1", "p1"), face("f2", "a1", null), face("f3", "a2", "p1")]);
+  store.putFaces([{ ...face("f2", "a1", "p2"), deleted: "2026-11-04T12:00:00.000Z" }]);
+  expect(store.facesOn("a1")).toEqual([face("f1", "a1", "p1"), { ...face("f2", "a1", "p2"), deleted: "2026-11-04T12:00:00.000Z" }]);
+  expect(store.assetsWithPerson("p1")).toEqual(["a1", "a2"]);
+  expect(store.removeFaces(["f3", "missing"])).toEqual(["a2"]);
+  expect(store.assetsWithPerson("p1")).toEqual(["a1"]);
+
+  // New people, renames and hiding are reported; the same record again isn't.
+  expect(store.putPeople([{ account: "alex", id: "p1", name: "", hidden: false }])).toEqual(["p1"]);
+  expect(store.putPeople([{ account: "alex", id: "p1", name: "", hidden: false }])).toEqual([]);
+  expect(store.putPeople([{ account: "alex", id: "p1", name: "Robin", hidden: false }, { account: "sam", id: "p1", name: "Robin", hidden: true }])).toEqual(["p1", "p1"]);
+  expect(store.person("sam", "p1")).toEqual({ account: "sam", id: "p1", name: "Robin", hidden: true });
+  store.removePerson("sam", "p1");
+  expect(store.person("sam", "p1")).toBeUndefined();
+
+  // A reset marks every face stale, and the account's people; the sweep drops what wasn't sent again.
+  store.putPeople([{ account: "alex", id: "p2", name: "Sam", hidden: false }]);
+  store.forgetAccount("alex");
+  store.putFaces([face("f1", "a1", "p1")]);
+  store.putPeople([{ account: "alex", id: "p1", name: "Robin", hidden: false }]);
+  expect(store.sweep("alex")?.sort()).toEqual(["a1"]);
+  expect(store.facesOn("a1").map((record) => record.id)).toEqual(["f1"]);
+  expect(store.person("alex", "p2")).toBeUndefined();
+  expect(store.person("alex", "p1")?.name).toBe("Robin");
 });
 
 test("units: last-synced values and the sidecar's stamp, kept between openings", () => {
