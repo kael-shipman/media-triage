@@ -3,13 +3,12 @@
 A personal utility I use to manage my household's shared photos and videos. It's public in case it's useful to
 someone with a similar setup, but it's built for mine. Expect rough edges, and read the design before relying on it.
 
-> **Status: under construction. Not usable yet.** The foundation works: the command line, the configuration,
-> self-upgrading, the installer and releases. So do the Immich client (`media-triage login <account>`), account
-> upkeep (libraries, the cluster group, shared people, and `media-triage check`), and reading and writing sidecars
-> (`media-triage sidecar FILE` shows what it reads), and sync: ratings, tags, titles, descriptions, capture times,
-> GPS and trash, between the sidecars, Darktable and every Immich copy; each account's favorites, archiving and
-> albums, and named faces, recorded in the sidecars; and deleting orphan sidecars. Filing isn't built yet. What's built
-> and what's next: [RESUME.md](RESUME.md).
+> **Status: built, not yet released or run on real files.** Everything described below works against a development
+> Immich: account upkeep (libraries, the cluster group, shared people, and `media-triage check`), sync (ratings, tags,
+> titles, descriptions, capture times, GPS and trash, between the sidecars, Darktable and every Immich copy), each
+> account's favorites, archiving and albums, and named faces, recorded in the sidecars, deleting orphan sidecars, and
+> filing, with everything put back on the new copies. There's no release yet, only pre-releases of the foundation.
+> What's left: [RESUME.md](RESUME.md).
 
 ## What it's for
 
@@ -96,6 +95,7 @@ skipped unless `MEDIA_TRIAGE_IMMICH_TESTS=1`:
 ```sh
 bun run immich up                        # start it, with two made-up users
 MEDIA_TRIAGE_IMMICH_TESTS=1 bun test     # every test, the integration tests included
+bun test/immich/smoke.ts                 # the daemon itself, filing a batch end to end (about 5 minutes)
 bun run immich down                      # stop it, and delete its data
 ```
 

@@ -8,8 +8,9 @@ you're about to build would change it, ask the author first.
 session stops partway. Each step ends with tests passing, the type check clean, a commit and a push; CI must stay
 green.
 
-**Last updated:** 2026-11-04. Milestones 1–7 of 8 are done. **Milestone 8, filing** (DESIGN.md section 7) is
-planned below; steps 1–5 are done, **next is step 6**, the smoke test.
+**Last updated:** 2026-11-05. **All 8 milestones are done** (the last, filing, on 2026-11-05). Nothing has run
+against the author's real files or server yet. **Next is running it for real** (below), which the author tags,
+approves or does.
 
 ## Working on it
 
@@ -22,8 +23,11 @@ planned below; steps 1–5 are done, **next is step 6**, the smoke test.
   `127.0.0.1:2284`, with made-up users (`alex@example.com`, the admin, and `sam@example.com`).
   - `bun run immich up` starts it (about a minute) and `bun run immich down` deletes everything. Leave it down when
     you stop: its database is in memory anyway.
-  - `MEDIA_TRIAGE_IMMICH_TESTS=1 bun test` runs everything against it (443 tests). Run it twice in a row on one
+  - `MEDIA_TRIAGE_IMMICH_TESTS=1 bun test` runs everything against it (444 tests). Run it twice in a row on one
     instance before calling a step done: tests must not depend on what other tests left behind.
+  - `bun test/immich/smoke.ts` is the daemon's smoke test (about 5 minutes): it runs `media-triage run` itself, with
+    two fresh accounts, and checks that it files a batch end to end (the file's header says what it does). Run it
+    after changing filing, sync or the daemon's jobs. It isn't part of `bun test`.
   - Shared test helpers are in `test/immich/harness.ts`: `describeImmich`, `mediaFolder`, `photos`,
     `indexedLibrary`, `newUser` (fresh users, for anything that changes an account for good, such as joining a
     cluster group), `configFor`, `api`, `waitFor`.
@@ -106,7 +110,26 @@ These shape milestone 6; DESIGN.md has each.
   paths) plus the inbox's sources, not everything under `paths.archive`, which is only where filing puts files.
 - **The check moves out of upkeep** when sync is built (milestone 6, step 1 below).
 
-## Next: milestone 8, filing
+## Next: running it for real
+
+The code is done. What's left is outside this repository. A release and every write to real files need the
+author; the F1 patch can be written before that.
+1. **A release,** `v0.1.0`: the author tags it (pushing a tag `vX.Y.Z` publishes it, DESIGN.md section 10). Only
+   the pre-releases `v0.1.0-rc.1` and `rc.2`, from milestone 1, exist.
+2. **F1, in the author's Immich fork** (not here): `refresh-metadata` reads a sidecar that appeared after Immich
+   indexed the file. Then `immich.reads_new_sidecars = true`. Until then, sync warns for every minimal sidecar (F2)
+   it makes, and Immich doesn't read them.
+3. **Deploying on the author's server,** after the fork runs there: install a release and exiftool, log each account
+   in, then `run --dry-run` over everything (DESIGN.md section 9). The author approves the first live write and the
+   first live filing.
+
+**Worth doing, not needed to run:**
+- Removing GPS or a date when a side drops one (now ignored, so nothing is lost; milestone 6).
+- Faces put back with Immich's own recognition: only faces added by hand are tested end to end, since the
+  development Immich has no machine learning.
+- A Live Photo and a video in the smoke test: filing them is covered by the plan's unit tests only.
+
+## Milestone 8, filing (done 2026-11-05)
 
 DESIGN.md section 7 (`Promote`). Decided with the author (2026-11-04): while filing puts a unit's per-account state
 back, sync leaves it alone (DESIGN.md section 7, "Holding the unit"). What milestone 7 gives it: each sidecar's
@@ -140,7 +163,16 @@ catching-up rule (`ReconcileContext.refreshing`).
    development Immich has no machine learning; reassigning and deleting are tested as rules): match the new copy's faces to the old copy's (IoU above 0.5, pure), wait for detection and recognition
    (time limit), reassign, add the hand-made ones, delete the deleted ones; with `mirrors_face_corrections`, on one
    copy only.
-6. **Smoke test** of the daemon filing a batch end to end against the development Immich; docs; milestone done.
+6. [x] **Smoke test** (done 2026-11-05: `test/immich/smoke.ts`): the daemon, run live against the development Immich
+   with two fresh accounts and four inbox photos, filed two promoted in Darktable (alike, so the second got `_01`),
+   held one promoted in Immich without a title with `Promote/Needs a title` until the other account gave it a title
+   in Immich, then filed it, and left the unpromoted one alone. A favorite and an archived copy (account one) and an
+   album (account two) were put back on the new copies, and the old copies went offline. A restart filed nothing more,
+   and both runs stopped cleanly on SIGTERM. Filing took about a minute after `Promote`, and putting back another.
+   Its first run found a bug in milestone 6's sync, fixed (`d011c6f`): the first reconcile ran while only one
+   account's copy was known and wrote the title tag; the other copy, learned a moment later, had read the sidecar
+   before that, and the merge took the missing tag as a removal and dropped the title. A copy the last sync didn't
+   read now isn't a side until it agrees with the sidecar (DESIGN.md section 5).
 
 ## Milestone 7, F9–F11 (done 2026-11-04)
 
@@ -305,9 +337,9 @@ first live write (DESIGN.md section 9).
 **6. Sync** (`src/sync/`, `src/core/merge.ts`), done 2026-11-04: the check as its own job, state, the watcher and
 full pass, the sync stream consumer, the reconcile loop, F1–F8 (F5 dropped), the daemon's jobs, a live smoke test.
 
-**7. F9–F11:** Immich-only state, named faces, orphan sidecars.
+**7. F9–F11**, done 2026-11-04: Immich-only state, named faces, orphan sidecars.
 
-**8. Filing:** section 7, with putting the per-account state back.
+**8. Filing**, done 2026-11-05: section 7, with putting the per-account state back, and the daemon's smoke test.
 
 ## Rules
 

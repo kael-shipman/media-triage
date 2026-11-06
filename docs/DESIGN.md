@@ -725,3 +725,5 @@ with what changed, not with the size of the archive.
 - 2026-11-04: filing built (milestone 8, steps 1–5): readiness, the plan, moving, holding the unit, putting back.
 - 2026-11-04: a copy the last sync didn't see isn't a side until it agrees with the sidecar (section 5): found by the
   smoke test, it removed a title.
+- 2026-11-05: milestone 8 done: the daemon's smoke test (`test/immich/smoke.ts`) filed a batch end to end, with
+  everything put back.
