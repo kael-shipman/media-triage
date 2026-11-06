@@ -397,6 +397,25 @@ describeImmich("reconciling a unit with two accounts' copies", () => {
     expect(new FilingStore(state.db).get(unit)?.status).toBe("done");
   }, 180_000);
 
+  test("a copy learned after its unit was trashed is trashed too, rather than restoring it (F8)", async () => {
+    const { unit, accounts, store, map, ctx, copy, read, token } = await twoAccounts("late-trash");
+    // The first syncs see only account one's copy, which one then trashes.
+    const late = copy("two").id;
+    store.removeAssets([late]);
+    await reconcile(ctx, [unit]);
+    await api("DELETE", "/assets", { token: await token("one"), body: { ids: [copy("one").id], force: false } });
+    await waitFor("one's copy in the trash", async () => ((await read("one")).isTrashed ? true : undefined));
+    await reconcile(ctx, [unit]);
+    expect(store.unit(unit)?.synced.trashed).toBe(true);
+
+    // Account two's copy, not in the trash, is learned (a new account's library): it follows the unit.
+    await learnAllAssets(accounts.find((account) => account.account.name === "two")!, store, map);
+    const report = await reconcile(ctx, [unit]);
+    expect(report).toMatchObject({ trashed: [late], restored: [] });
+    await waitFor("two's copy in the trash", async () => ((await read("two")).isTrashed ? true : undefined));
+    expect((await read("one")).isTrashed).toBe(true);
+  }, 180_000);
+
   test("a copy learned after the first sync doesn't undo what that sync wrote, such as the title tag", async () => {
     const { unit, accounts, store, map, ctx, copy, settled } = await twoAccounts("late-copy");
     const tagsOf = (asset: Asset) => (asset.tags ?? []).map((tag) => tag.value).sort();

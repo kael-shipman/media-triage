@@ -8,14 +8,15 @@ you're about to build would change it, ask the author first.
 session stops partway. Each step ends with tests passing, the type check clean, a commit and a push; CI must stay
 green.
 
-**Last updated:** 2026-11-05. **All 8 milestones are done** (the last, filing, on 2026-11-05). Nothing has run
-against the author's real files or server yet. **Next is running it for real** (below), which the author tags,
-approves or does.
+**Last updated:** 2026-11-05. **All 8 milestones are done** (the last, filing, on 2026-11-05), and the first run
+over a real archive was checked and four ways it could lose data were fixed ("Checked before the first real run",
+below). Nothing has run against the author's real files or server yet. **Next is running it for real** (below), which
+the author tags, approves or does.
 
 ## Working on it
 
 - **Bun 1.4** runs and builds it. Without Bun installed, `npx --yes bun@1.4.4` stands in for `bun`:
-  - `bun test`: the unit tests (394; 392 in CI, which skips the two that need Darktable), and the integration tests,
+  - `bun test`: the unit tests (397; 395 in CI, which skips the two that need Darktable), and the integration tests,
     skipped;
   - `bun run typecheck`: TypeScript, over `src/`, `scripts/` and `test/`;
   - `bun run build [version]`: executables for linux-x64 and linux-arm64 in `dist/` (`TARGETS=linux-x64` for one).
@@ -23,7 +24,7 @@ approves or does.
   `127.0.0.1:2284`, with made-up users (`alex@example.com`, the admin, and `sam@example.com`).
   - `bun run immich up` starts it (about a minute) and `bun run immich down` deletes everything. Leave it down when
     you stop: its database is in memory anyway.
-  - `MEDIA_TRIAGE_IMMICH_TESTS=1 bun test` runs everything against it (444 tests). Run it twice in a row on one
+  - `MEDIA_TRIAGE_IMMICH_TESTS=1 bun test` runs everything against it (452 tests). Run it twice in a row on one
     instance before calling a step done: tests must not depend on what other tests left behind.
   - `bun test/immich/smoke.ts` is the daemon's smoke test (about 5 minutes): it runs `media-triage run` itself, with
     two fresh accounts, and checks that it files a batch end to end (the file's header says what it does). Run it
@@ -110,18 +111,65 @@ These shape milestone 6; DESIGN.md has each.
   paths) plus the inbox's sources, not everything under `paths.archive`, which is only where filing puts files.
 - **The check moves out of upkeep** when sync is built (milestone 6, step 1 below).
 
+## Checked before the first real run (2026-11-05)
+
+Read every path the first run takes over an archive Immich already indexed, then tested it.
+- **Four ways to lose data, fixed** (DESIGN.md section 5; tests in `src/sync/first-contact.test.ts`, the merge's and
+  tags' unit tests, and "a copy learned after its unit was trashed…" in `reconcile.test.ts`; each test failed before
+  its fix):
+  1. a sidecar Immich doesn't know (made after it indexed the photo: by Darktable, or F2) lost its tags, title,
+     rating and description on the second reconcile, to the copy that never read it: a refresh doesn't read it but
+     updates the asset, which looked like catching up;
+  2. a reject (-1), which Immich reads as unrated, was cleared after any refresh;
+  3. without a base, a Darktable change Immich hadn't read lost to Immich's older value whenever anything else had
+     updated the asset since (a favorite, a job);
+  4. a new account's copy of a photo in the trash restored it.
+
+  The fix: each copy is compared with what it said itself at the last sync (`SyncedValues.seen`), a copy the last sync
+  didn't see takes the unit's state, and without a base the sidecar's values come first. Also, descriptions compare
+  without surrounding spaces, as Immich reads them (163 of the author's sidecars hold `"AppleMark\n"`, which would
+  have been rewritten for nothing).
+- **A read-only scan of the author's 18,229 sidecars** with the daemon's own rules (not kept: it was run on their
+  files): 10,557 would be written on the first run, nearly all to add `TagsList` with the title's tag; 103 rejects; 9
+  titles with a `/`, reported as conflicts and left alone; 139 Darktable duplicates' sidecars; no `TagsList` yet.
+- **A rehearsal on copies of 47 of the author's photos** (RAW and JPEG, rejects, duplicates, odd names, orphans, the
+  titles with `/`, three inbox photos without sidecars), indexed by Immich first, with edits made in Immich, then the
+  daemon's dry run and a live run:
+  - the dry run changed nothing; the live run moved, deleted or changed no media file and deleted no sidecar;
+  - no tag or keyword was removed from any sidecar, and no rating, title, description or GPS changed, except the
+    Immich edits reaching Darktable's fields;
+  - what was added: `TagsList` with the title's tag (22), the capture time's zone (F6, 10), `mediatriage:Accounts`
+    (4), and keywords Immich read from the image file itself (older JPEGs carry them) into Darktable's fields;
+  - Darktable's own data was the same in all 55 sidecars (exiftool writes Darktable's attributes as elements, and
+    drops empty ones), and darktable-cli rendered three edited photos pixel for pixel the same from the original and
+    the rewritten sidecars;
+  - Darktable's duplicates' sidecars, a `name.xmp` sidecar and two orphans were left byte for byte as they were.
+- **Known, not data loss:** where a sidecar has no `TagsList` and the image file embeds one, Immich shows the file's,
+  so `copyInStep` never holds and that copy is refreshed again each time its unit is reconciled (an hour apart at
+  most). Writing `TagsList` there too would end it.
+
 ## Next: running it for real
 
 The code is done. What's left is outside this repository. A release and every write to real files need the
 author; the F1 patch can be written before that.
-1. **A release,** `v0.1.0`: the author tags it (pushing a tag `vX.Y.Z` publishes it, DESIGN.md section 10). Only
-   the pre-releases `v0.1.0-rc.1` and `rc.2`, from milestone 1, exist.
+1. **A release,** `v0.1.0` (or a pre-release first): the author tags it (pushing a tag `vX.Y.Z` publishes it,
+   DESIGN.md section 10). Only the pre-releases `v0.1.0-rc.1` and `rc.2`, from milestone 1, exist.
 2. **F1, in the author's Immich fork** (not here): `refresh-metadata` reads a sidecar that appeared after Immich
    indexed the file. Then `immich.reads_new_sidecars = true`. Until then, sync warns for every minimal sidecar (F2)
-   it makes, and Immich doesn't read them.
-3. **Deploying on the author's server,** after the fork runs there: install a release and exiftool, log each account
-   in, then `run --dry-run` over everything (DESIGN.md section 9). The author approves the first live write and the
-   first live filing.
+   it makes, and Immich doesn't read those sidecars, nor others made after it indexed a photo; nothing is lost
+   (since 2026-11-05), they're just not seen in Immich. On a server without the patch, Immich's own admin job
+   "Sidecar metadata, Discover" (not "Sync") makes it find and read them.
+3. **Deploying on the author's server:** install a release and exiftool, log each account in, then `run --dry-run`
+   over everything (DESIGN.md section 9). The author approves the first live write and the first live filing.
+   - **Libraries are matched by owner and name:** the configuration's names and folders must be the existing
+     libraries', or upkeep creates new ones (a second copy of everything) or changes their folders. The dry run
+     says "would create library" or "would update library … folders" if they don't match: none should appear.
+   - The dry run lists the conflicts (titles with a `/`), the orphans it leaves alone, what it would file, and the
+     first 20 sidecars it would write. It doesn't count what it would write per field.
+   - The first live run writes most sidecars once (the title's tag for Immich, the capture time's zone), and asks
+     Immich to re-read each. Darktable then lists them at its next start, to reload.
+   - An account added later (a second account's libraries) is safe to add while sync runs: its copies take each
+     unit's state, the trash included.
 
 **Worth doing, not needed to run:**
 - Removing GPS or a date when a side drops one (now ignored, so nothing is lost; milestone 6).

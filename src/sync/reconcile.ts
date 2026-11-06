@@ -342,9 +342,18 @@ async function reconcileUnit(
   const sides: Side[] = copies.map((copy) => {
     const values = copyValues(copy.asset);
     // A copy catching up still says whether it's in the trash: that's not from the sidecar.
-    return { name: `${copy.record.account}:${copy.asset.id}`, at: Date.parse(copy.asset.updatedAt), values: catchingUp.has(copy.asset.id) ? { trashed: values.trashed, offline: values.offline } : values };
+    // What it said at the last sync: a value it still holds isn't a change (a copy that hasn't read the sidecar, F1,
+    // or can't show a reject, keeps saying the same). A copy the last sync didn't see proposes nothing, its trash
+    // included: it takes the unit's state, so a new account's copy of a trashed photo is trashed, not a restore.
+    const last = previous?.synced.seen?.[copy.asset.id] ?? (known && !known.includes(copy.asset.id) ? values : undefined);
+    return {
+      name: `${copy.record.account}:${copy.asset.id}`,
+      at: Date.parse(copy.asset.updatedAt),
+      values: catchingUp.has(copy.asset.id) ? { trashed: values.trashed, offline: values.offline } : values,
+      ...(last ? { last } : {}),
+    };
   });
-  if (fields) sides.unshift({ name: "darktable", at: sidecar?.stamp.mtimeMs ?? 0, values: darktableValues(fields) });
+  if (fields) sides.unshift({ name: "darktable", at: sidecar?.stamp.mtimeMs ?? 0, sidecar: true, values: darktableValues(fields) });
   if (sides.length === 0) return;
 
   // 2. Merge.
@@ -429,6 +438,7 @@ async function reconcileUnit(
       people: faces?.madeTags ?? previous?.synced.people ?? [],
       regions: faces?.madeRegions ?? previous?.synced.regions ?? [],
       copies: copies.map((copy) => copy.asset.id),
+      seen: Object.fromEntries(copies.map((copy) => [copy.asset.id, copyValues(copy.asset)])),
     };
     store.putUnits([{ path: unit, ...(stamp ? { sidecar: stamp } : {}), synced, updated: new Date().toISOString() }]);
   }

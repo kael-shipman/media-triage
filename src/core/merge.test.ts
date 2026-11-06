@@ -56,12 +56,35 @@ describe("mergeUnit", () => {
     expect(result.title).toBeNull();
   });
 
-  test("without a base: the union of tags, and the latest value anyone holds", () => {
+  test("without a base: the union of tags, and the sidecar's values, which copies only fill in", () => {
     const result = merged(undefined, undefined, [
-      { name: "darktable", at: 10, values: { rating: 3, tags: ["Places/Lake", "Title/Lake day"], description: null, date: "2021:06:15 10:20:30.000", gps: null } },
-      { name: "alex", at: 20, values: { rating: null, tags: ["People/Robin"], description: null, date: "2021:06:15 10:20:30.000+02:00", gps: null, trashed: false } },
+      { name: "darktable", at: 10, sidecar: true, values: { rating: 3, tags: ["Places/Lake", "Title/Lake day"], description: null, date: "2021:06:15 10:20:30.000", gps: null } },
+      { name: "alex", at: 20, values: { rating: 5, tags: ["People/Robin"], description: "From Immich", date: "2021:06:15 11:00:00.000+02:00", gps: null, trashed: false } },
     ]);
-    expect(result).toMatchObject({ rating: 3, tags: ["People/Robin", "Places/Lake"], title: "Lake day", date: "2021:06:15 10:20:30.000+02:00", trashed: false });
+    // The copy changed later, but Immich writes its edits to the sidecar: a copy that differs hasn't read it.
+    expect(result).toMatchObject({ rating: 3, tags: ["People/Robin", "Places/Lake"], title: "Lake day", date: "2021:06:15 10:20:30.000", description: "From Immich" });
+    expect(result.from).toMatchObject({ rating: "darktable", date: "darktable", description: "alex" });
+  });
+
+  test("a copy that still says what it said at the last sync changes nothing, though the merge went another way", () => {
+    // It never read the sidecar (F1), or it can't show a reject (-1): it said no rating, no title and no tags then, and
+    // still does.
+    const last = { rating: null, description: null, tags: [], date: "2021:06:15 10:20:30.000", gps: null, trashed: false };
+    const result = merged({ ...base, rating: -1 }, "Lake day", [same("darktable", 1, { rating: -1 }), { name: "alex", at: 99, values: last, last }]);
+    expect(result).toMatchObject({ rating: -1, title: "Lake day", tags: ["Places/Lake"], description: "A day out" });
+    expect(result.from).toEqual({});
+  });
+
+  test("a copy's own changes since the last sync apply, and two accounts' edits made just apart both stay", () => {
+    const lastOf = { rating: 3, description: "A day out", tags: ["Places/Lake", "Title/Lake day"], date: "2021:06:15 10:20:30.000", gps: null, trashed: false };
+    // Alex added A; then Sam added B, and Sam's copy rewrote the sidecar's Immich tags without A. Darktable's fields
+    // haven't been written yet.
+    const result = merged(base, "Lake day", [
+      same("darktable", 1),
+      { name: "alex", at: 2, values: { ...lastOf, tags: [...lastOf.tags, "A"], rating: 4 }, last: lastOf },
+      { name: "sam", at: 3, values: { ...lastOf, tags: [...lastOf.tags, "B"] }, last: lastOf },
+    ]);
+    expect(result).toMatchObject({ tags: ["A", "B", "Places/Lake"], rating: 4 });
   });
 
   test("F8: a trash on a copy that's online is mirrored, an offline one isn't, and a restore is", () => {

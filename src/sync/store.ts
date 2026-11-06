@@ -18,7 +18,7 @@
 // Every write is one transaction.
 
 import type { Database } from "bun:sqlite";
-import type { Base } from "../core/merge.ts";
+import type { Base, SideValues } from "../core/merge.ts";
 import type { Area, FaceBox } from "../core/regions.ts";
 import type { FileStamp } from "../sidecars/sidecar.ts";
 
@@ -78,6 +78,8 @@ export interface SyncedValues extends Base {
   regions?: { name: string; area: Area }[];
   /** The copies (asset IDs) this sync read: one not among them may not have read the sidecar yet. */
   copies?: string[];
+  /** What each of those copies said, by asset ID: the merge compares each copy with what it said itself. */
+  seen?: Record<string, SideValues>;
 }
 
 export interface UnitRecord {

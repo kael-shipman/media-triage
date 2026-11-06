@@ -166,8 +166,24 @@ If the state is lost, merge as a union, which never drops a tag, and report it.
   null, dates by wall time.
 - **The base** is the unit's last-synced record. Tags merge tag by tag against it; the rating, description, date and
   GPS go to the latest change (a side that differs from the base, the latest by the sidecar's mtime or the asset's
-  `updatedAt`); trash follows a copy that isn't offline (F8). Without a base: the union of tags, and the latest value
-  anyone holds.
+  `updatedAt`); trash follows a copy that isn't offline (F8).
+- **Each copy is also compared with what it said itself at the last sync** (the record keeps every copy's values,
+  `SyncedValues.seen`). A value a copy still holds isn't a change, even where the merge went another way: it removes
+  only a tag it held then, and adds only one it didn't. Otherwise a copy that keeps an older value would undo the
+  sidecar's, over and over (found checking the first run on real files, 2026-11-05; `src/sync/first-contact.test.ts`):
+  - **a sidecar Immich doesn't know** (F1: made after Immich indexed the photo, by Darktable or by F2): a refresh
+    doesn't read it but still updates the asset, so the copy seemed to have caught up, and its missing tags, title
+    and rating read as removals, and were deleted from the sidecar;
+  - **a reject** (`xmp:Rating` -1), which Immich reads as unrated: the copy's "no rating" cleared it.
+
+  A copy the last sync didn't see (a new account's library, a copy learned late) proposes nothing at all, its trash
+  included: it takes the unit's state. Otherwise a new account's copy of a photo in the trash, itself not trashed,
+  read as a restore, and took the photo out of the trash for everyone.
+- **Without a base** (the first sync, or a lost state): the union of tags, which never drops one, and for the rating,
+  description, date and GPS, the sidecar's value, or the latest copy's where the sidecar has none. Every edit made in
+  Immich is written to the sidecar, so a copy that differs from it hasn't read it: on the first run, a change made in
+  Darktable that Immich never read would otherwise lose to Immich's older value, whenever anything else had updated
+  the asset since (a favorite, a job). A description is compared without the spaces around it, as Immich reads it.
 - **Telling Immich:** when the sidecar is written, every copy is refreshed; otherwise only copies that don't hold what
   they'd read from the sidecar (`immichReads`), such as another account's copy after an edit in Immich. Refreshes,
   trashes and restores are batched per account.
@@ -266,6 +282,8 @@ If the state is lost, merge as a union, which never drops a tag, and report it.
   one made a minute earlier in another, before that copy re-read it.
   - Each copy, read through the API, is a source next to the sidecar.
   - Tags merge tag by tag. For the rating, title and description, the latest change wins.
+  - A copy's change is what differs from what that copy said at the last sync (section 5), so both of two edits made
+    a minute apart in two accounts stay, though the second copy's sidecar write left out the first's tag.
 - **F8. Trash.** Trashing or restoring one copy does the same to the others, with each owner's session. Emptying
   either trash deletes the file, and the other copies go offline.
   - **Offline looks like trash** (checked against 3.3.5): a library file that goes missing or is newly excluded gets
@@ -727,3 +745,9 @@ with what changed, not with the size of the archive.
   smoke test, it removed a title.
 - 2026-11-05: milestone 8 done: the daemon's smoke test (`test/immich/smoke.ts`) filed a batch end to end, with
   everything put back.
+- 2026-11-05: before the first run on real files, three ways it could lose what a sidecar holds, found by reading the
+  first run's paths and confirmed by `src/sync/first-contact.test.ts`, and fixed (section 5): a sidecar
+  Immich never read lost its tags, title and rating to the copy that didn't read it; a reject was cleared; on the first
+  run, a Darktable change Immich hadn't read lost to Immich's older value; and a new account's copy of a trashed photo
+  restored it. Each copy is now compared with what it said itself at the last sync, a copy the last sync didn't see
+  takes the unit's state, and without a base the sidecar's values come first.
