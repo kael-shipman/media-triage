@@ -8,10 +8,10 @@ you're about to build would change it, ask the author first.
 session stops partway. Each step ends with tests passing, the type check clean, a commit and a push; CI must stay
 green.
 
-**Last updated:** 2026-11-05. **All 8 milestones are done** (the last, filing, on 2026-11-05), and the first run
-over a real archive was checked and four ways it could lose data were fixed ("Checked before the first real run",
-below). Nothing has run against the author's real files or server yet. **Next is running it for real** (below), which
-the author tags, approves or does.
+**Last updated:** 2026-11-07 (`v0.1.0` released). **All 8 milestones are done** (the last, filing, on 2026-11-05),
+and the first run over a real archive was checked and four ways it could lose data were fixed ("Checked before the
+first real run", below). Nothing has run against the author's real files or server yet. **Next is running it for
+real** (below), which the author approves or does.
 
 ## Working on it
 
@@ -43,7 +43,9 @@ the author tags, approves or does.
 - **Immich's source**, for checking behavior: the fork's clone at `~/Desktop/tmp-repos/immich`, branch `twins`, based
   on v3.3.5. Look in `server/src`: `controllers/`, `dtos/`, `services/`, `repositories/`. Use Immich only through
   its API, never its database.
-- **Releases:** `v0.1.0-rc.1` and `rc.2` exist, from milestone 1 only. Don't tag a release without the author.
+- **Releases:** `v0.1.0` (2026-11-07, everything through milestone 8 and the fixes of 2026-11-05), and the
+  pre-releases `v0.1.0-rc.1` and `rc.2`, from milestone 1 only. Pushing a tag `vX.Y.Z` publishes a release
+  (DESIGN.md section 10). Don't tag a release without the author.
 
 ## Where things stand
 
@@ -150,10 +152,9 @@ Read every path the first run takes over an archive Immich already indexed, then
 
 ## Next: running it for real
 
-The code is done. What's left is outside this repository. A release and every write to real files need the
-author; the F1 patch can be written before that.
-1. **A release,** `v0.1.0` (or a pre-release first): the author tags it (pushing a tag `vX.Y.Z` publishes it,
-   DESIGN.md section 10). Only the pre-releases `v0.1.0-rc.1` and `rc.2`, from milestone 1, exist.
+The code is done. What's left is outside this repository. Every write to real files needs the author; the F1
+patch can be written before that.
+1. [x] **A release:** `v0.1.0`, tagged at the author's request on 2026-11-07.
 2. **F1, in the author's Immich fork** (not here): `refresh-metadata` reads a sidecar that appeared after Immich
    indexed the file. Then `immich.reads_new_sidecars = true`. Until then, sync warns for every minimal sidecar (F2)
    it makes, and Immich doesn't read those sidecars, nor others made after it indexed a photo; nothing is lost

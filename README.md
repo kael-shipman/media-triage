@@ -3,11 +3,11 @@
 A personal utility I use to manage my household's shared photos and videos. It's public in case it's useful to
 someone with a similar setup, but it's built for mine. Expect rough edges, and read the design before relying on it.
 
-> **Status: built, not yet released or run on real files.** Everything described below works against a development
+> **Status: released (`v0.1.0`), not yet run on real files.** Everything described below works against a development
 > Immich: account upkeep (libraries, the cluster group, shared people, and `media-triage check`), sync (ratings, tags,
 > titles, descriptions, capture times, GPS and trash, between the sidecars, Darktable and every Immich copy), each
 > account's favorites, archiving and albums, and named faces, recorded in the sidecars, deleting orphan sidecars, and
-> filing, with everything put back on the new copies. There's no release yet, only pre-releases of the foundation.
+> filing, with everything put back on the new copies.
 > What's left: [RESUME.md](RESUME.md).
 
 ## What it's for
@@ -58,7 +58,7 @@ One daemon, running where the files and Immich are:
 
 ## Installing
 
-Once there's a release (Linux, x64 or arm64):
+On Linux, x64 or arm64:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/kael-shipman/media-triage/main/install.sh | sh
