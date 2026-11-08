@@ -68,9 +68,49 @@ test("collisions with what's on disk, its sidecars, and the batch's earlier unit
   expect(destinations).toEqual(["2021.06.15-10.20.30 - Alex Example_01.jpg", "2021.06.15-10.20.30 - Alex Example_02.jpg", "2021.06.15-10.20.30 - Alex Example_03.jpg"]);
 });
 
+test("Darktable duplicates' sidecars go with their photo, keeping their numbers", () => {
+  const folder = "/srv/Pictures/2021.06.15 - Lake day";
+  const files = [input.unit, `${inbox}/IMG_1.jpg.xmp`, `${inbox}/IMG_1_01.jpg.xmp`, `${inbox}/IMG_1_03.jpg.xmp`, `${inbox}/IMG_2.jpg.xmp`];
+  expect(planUnit(config, input, new Set(), fakeDisk(files))).toEqual({
+    plan: {
+      unit: input.unit,
+      destination: `${folder}/2021.06.15-10.20.30 - Alex Example.jpg`,
+      moves: [
+        { from: input.unit, to: `${folder}/2021.06.15-10.20.30 - Alex Example.jpg` },
+        { from: `${inbox}/IMG_1.jpg.xmp`, to: `${folder}/2021.06.15-10.20.30 - Alex Example.jpg.xmp` },
+        { from: `${inbox}/IMG_1_01.jpg.xmp`, to: `${folder}/2021.06.15-10.20.30 - Alex Example_01.jpg.xmp` },
+        { from: `${inbox}/IMG_1_03.jpg.xmp`, to: `${folder}/2021.06.15-10.20.30 - Alex Example_03.jpg.xmp` },
+      ],
+    },
+  });
+});
+
+test("a photo whose own name ends like a duplicate's isn't one, and keeps its own sidecar", () => {
+  // IMG_1_01.jpg is a photo of its own, beside IMG_1.jpg.
+  const files = [input.unit, `${inbox}/IMG_1.jpg.xmp`, `${inbox}/IMG_1_01.jpg`, `${inbox}/IMG_1_01.jpg.xmp`];
+  const result = planUnit(config, input, new Set(), fakeDisk(files));
+  expect("plan" in result && result.plan.moves.map((move) => move.from)).toEqual([input.unit, `${inbox}/IMG_1.jpg.xmp`]);
+});
+
+test("a duplicate's new name can't be another photo's, or its sidecar: the unit takes the next collision number", () => {
+  const folder = "/srv/Pictures/2021.06.15 - Lake day";
+  const files = [input.unit, `${inbox}/IMG_1.jpg.xmp`, `${inbox}/IMG_1_01.jpg.xmp`, `${inbox}/IMG_2.jpg`];
+  const taken = new Set<string>();
+  // On disk, a photo filed earlier with collision number 1: its name is what IMG_1's duplicate would take.
+  const on = fakeDisk([...files, `${folder}/2021.06.15-10.20.30 - Alex Example_01.jpg`]);
+  const first = planUnit(config, input, taken, on);
+  expect("plan" in first && first.plan.moves.map((move) => move.to.slice(folder.length + 1))).toEqual([
+    "2021.06.15-10.20.30 - Alex Example_02.jpg",
+    "2021.06.15-10.20.30 - Alex Example_02.jpg.xmp",
+    "2021.06.15-10.20.30 - Alex Example_02_01.jpg.xmp",
+  ]);
+  // And the next unit in the batch doesn't take a duplicate's name either.
+  const second = planUnit(config, { ...input, unit: `${inbox}/IMG_2.jpg` }, taken, on);
+  expect("plan" in second && second.plan.destination.slice(folder.length + 1)).toBe("2021.06.15-10.20.30 - Alex Example.jpg");
+});
+
 test.each<[string, Parameters<typeof planUnit>[1], Disk, string]>([
   ["no capture time", { ...input, date: null }, fakeDisk([input.unit]), "it has no capture time"],
-  ["Darktable duplicates", input, fakeDisk([input.unit, `${inbox}/IMG_1_01.jpg.xmp`]), "it has Darktable duplicates, which filing doesn't move"],
   ["another filesystem", input, fakeDisk([input.unit], { "/srv/Pictures": 2 }), "the archive is on another filesystem than /srv/Inbox/Phone"],
 ])("not filed: %s", (_name, unit, on, problem) => {
   expect(planUnit(config, unit, new Set(), on)).toEqual({ problem });

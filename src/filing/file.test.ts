@@ -64,6 +64,22 @@ test("a batch is moved: the files under their new names, Promote out of the side
   expect(ctx.store.isBeingPutBack(first)).toBe(true);
 });
 
+test("a photo's Darktable duplicates go with it, keeping their numbers and their edits, without Promote", async () => {
+  const one = await readyPhoto("IMG_1.jpg");
+  // Darktable's duplicate 1 of IMG_1.jpg: a sidecar of its own, tagged Promote too, with its own rating.
+  const duplicate = join(dirname(one.unit), "IMG_1_01.jpg.xmp");
+  copyFileSync(`${one.unit}.xmp`, duplicate);
+  await exiftool.write(duplicate, { "XMP-xmp:Rating": 5 });
+  const report = await fileBatch(ctx, [one]);
+  const filed = join(folder(), "2021.06.15-10.20.30 - Alex Example.jpg");
+  expect(report).toEqual({ filed: [{ unit: one.unit, destination: filed }], problems: [] });
+  expect(existsSync(duplicate)).toBe(false);
+  const moved = (await readSidecar(exiftool, join(folder(), "2021.06.15-10.20.30 - Alex Example_01.jpg.xmp")))!.fields;
+  expect(moved.rating).toBe(5);
+  expect(moved.hierarchicalSubject).not.toContain("Promote");
+  expect(moved.hierarchicalSubject).toContain("Places|Lake");
+});
+
 test("a dry run plans and moves nothing", async () => {
   const one = await readyPhoto("IMG_1.jpg");
   const report = await fileBatch({ ...ctx, dryRun: true }, [one]);

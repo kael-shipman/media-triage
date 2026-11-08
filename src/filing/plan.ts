@@ -1,13 +1,13 @@
-// Where filing puts a ready unit (DESIGN.md, section 7): the moves for its media file, its sidecar, and a Live Photo's
-// video with its sidecar, named as the author's Darktable "Archive RAW" export preset names files, with one collision
-// number for the whole unit. Planned for a whole batch before anything moves, so names in the batch don't collide.
+// Where filing puts a ready unit (DESIGN.md, section 7): the moves for its media file, its sidecar, its Darktable
+// duplicates' sidecars, and a Live Photo's video with its sidecar, named as the author's Darktable "Archive RAW" export
+// preset names files, with one collision number for the whole unit. Planned for a whole batch before anything moves, so names in the batch don't collide.
 // What's on disk is only looked at, through `Disk`, so the plan can be tested without files.
 
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
 import type { Config } from "../config.ts";
 import { isVideo } from "../core/media.ts";
-import { fileName, filingName, freeCollision, parseWallTime, sidecarName } from "../core/naming.ts";
+import { duplicateName, fileName, filingName, freeCollision, parseWallTime, sidecarName } from "../core/naming.ts";
 import { dateFromImmich } from "../core/xmp.ts";
 
 export interface Move {
@@ -19,7 +19,7 @@ export interface UnitPlan {
   unit: string;
   /** The media file's new path: the unit's, once filed. */
   destination: string;
-  /** The media file first, then its sidecar, then a Live Photo's video and its sidecar. */
+  /** The media file first, then its sidecar and its Darktable duplicates' sidecars, then a Live Photo's video and its sidecar. */
   moves: Move[];
 }
 
@@ -61,11 +61,18 @@ export interface PlanInput {
 const extension = (path: string) => extname(path).slice(1);
 const stemOf = (name: string) => name.slice(0, name.length - extname(name).length);
 
-/** Darktable duplicates' sidecars of a media file: `<stem>_01.<ext>.xmp`, and so on. */
+/**
+ * The numbers of a media file's Darktable duplicates ("01" for `<stem>_01.<ext>.xmp`, and so on), from the names in
+ * its folder. A name that's a media file's own sidecar isn't a duplicate's: a photo can be called `<stem>_01.<ext>`.
+ */
 function duplicates(unit: string, names: readonly string[]): string[] {
   const name = basename(unit);
-  const pattern = new RegExp(`^${RegExp.escape(stemOf(name))}_\\d{2,}${RegExp.escape(extname(name))}\\.xmp$`, "i");
-  return names.filter((candidate) => pattern.test(candidate));
+  const pattern = new RegExp(`^${RegExp.escape(stemOf(name))}_(\\d{2,})${RegExp.escape(extname(name))}\\.xmp$`);
+  const present = new Set(names);
+  return names.flatMap((candidate) => {
+    const number = pattern.exec(candidate)?.[1];
+    return number !== undefined && !present.has(candidate.slice(0, -".xmp".length)) ? [number] : [];
+  });
 }
 
 /**
@@ -77,8 +84,7 @@ export function planUnit(config: Config, input: PlanInput, taken: Set<string>, o
   const time = parseWallTime(input.date ?? "") ?? (input.immich ? parseWallTime(dateFromImmich(input.immich)) : undefined);
   if (!time) return { problem: "it has no capture time" };
 
-  const siblings = on.list(dirname(input.unit));
-  if (duplicates(input.unit, siblings).length > 0) return { problem: "it has Darktable duplicates, which filing doesn't move" };
+  const copies = duplicates(input.unit, on.list(dirname(input.unit)));
 
   const root = isVideo(input.unit) ? config.filing.videos : config.filing.photos;
   const name = filingName({ root, time, title: input.title, creator: input.creator ?? undefined });
@@ -86,12 +92,15 @@ export function planUnit(config: Config, input: PlanInput, taken: Set<string>, o
   if (on.device(folder) !== on.device(input.unit)) return { problem: `the archive is on another filesystem than ${dirname(input.unit)}` };
 
   const files = [input.unit, ...(input.liveVideo ? [input.liveVideo] : [])];
-  const collision = freeCollision(name.stem, files.map(extension), (candidate) => taken.has(join(folder, candidate)) || on.exists(join(folder, candidate)));
+  const isTaken = (candidate: string) => taken.has(join(folder, candidate)) || on.exists(join(folder, candidate));
+  const collision = freeCollision(name.stem, files.map(extension), isTaken, copies);
   const moves: Move[] = [];
   for (const file of files) {
     const to = join(folder, fileName(name.stem, extension(file), collision));
     moves.push({ from: file, to });
     if (on.exists(sidecarName(file))) moves.push({ from: sidecarName(file), to: sidecarName(to) });
+    // Darktable's duplicates are their sidecars alone, named after the file: they keep their numbers.
+    if (file === input.unit) for (const number of copies) moves.push({ from: sidecarName(duplicateName(file, number)), to: sidecarName(duplicateName(to, number)) });
   }
   for (const move of moves) taken.add(move.to);
   return { plan: { unit: input.unit, destination: moves[0]!.to, moves } };

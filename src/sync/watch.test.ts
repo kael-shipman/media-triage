@@ -42,18 +42,26 @@ test("covered folders: libraries' folders through the path map, and the inbox's 
   expect(coveredFolders(config)).toEqual({ folders: ["/media/Inbox", "/media/Pictures", "/media/Videos"], unmapped: ["/elsewhere/Photos"] });
 });
 
+/** The media files on the disk unitOf looks at. */
+const onDisk = new Set(["/a/photo.jpg", "/a/PXL_20261031_212120738.jpg", "/a/DSC_0001.NEF", "/a/Lake.jpg", "/a/Lake_01.jpg"]);
+
 test.each([
   ["/a/photo.jpg", "/a/photo.jpg"],
   ["/a/photo.JPG.xmp", "/a/photo.JPG"],
   ["/a/clip.mp4", "/a/clip.mp4"],
   ["/a/photo.xmp", undefined],
+  // A Darktable duplicate's sidecar…
   ["/a/photo_01.jpg.xmp", undefined],
+  // …but not a photo's own whose name ends the same way.
+  ["/a/PXL_20261031_212120738.jpg.xmp", "/a/PXL_20261031_212120738.jpg"],
+  ["/a/DSC_0001.NEF.xmp", "/a/DSC_0001.NEF"],
+  ["/a/Lake_01.jpg.xmp", "/a/Lake_01.jpg"],
   ["/a/notes.txt", undefined],
   ["/a/.photo.jpg.media-triage-1-abc.xmp", undefined],
   ["/a/photo.jpg.xmp_exiftool_tmp", undefined],
   ["/a/photo.jpg.sync-conflict-20261103-101010-ABCDEFG.xmp", undefined],
 ])("unitOf(%p) is %p", (path, unit) => {
-  expect(unitOf(path)).toBe(unit);
+  expect(unitOf(path, (file) => onDisk.has(file))).toBe(unit);
 });
 
 test("the watch allowance is fine with room to spare, and says how to raise it otherwise", () => {

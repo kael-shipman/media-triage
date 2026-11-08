@@ -1,7 +1,7 @@
 // What sync covers (DESIGN.md, sections 1 and 13): the covered folders, the media files in them, and each one's
 // sidecar. The watcher and the full pass both start here.
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { basename, extname, join, normalize } from "node:path";
 import type { Config } from "../config.ts";
 import { IMMICH_EXTENSIONS } from "../core/media.ts";
@@ -46,13 +46,19 @@ export function isMedia(name: string): boolean {
  * Undefined for what sync leaves alone: hidden files (including temporary ones, the daemon's and Syncthing's),
  * exiftool's temporary files, Syncthing's conflict copies, other files, and sidecars named any other way (Darktable
  * reads only `<file>.<ext>.xmp`, so a `<stem>.xmp` or a duplicate's `<stem>_01.<ext>.xmp` isn't synced).
+ *
+ * A sidecar named like a duplicate's is one only if there's no media file of its own name and there is one without
+ * the number: a Pixel's `PXL_20261031_212120738.jpg`, a camera's `DSC_0001.NEF` or a filed `…_01.jpg` end the same way
+ * (as `sidecarOwner` decides, in src/core/orphans.ts).
  */
-export function unitOf(path: string): string | undefined {
+export function unitOf(path: string, exists: (path: string) => boolean = existsSync): string | undefined {
   const name = basename(path);
   if (name.startsWith(".") || name.includes("_exiftool_tmp") || isConflictCopy(name)) return undefined;
   if (isSidecar(name)) {
     const media = path.slice(0, -".xmp".length);
-    return isMedia(media) && !/_\d{2,}\.[^.]+$/.test(basename(media)) ? media : undefined;
+    if (!isMedia(media)) return undefined;
+    const duplicate = /^(.*)_\d{2,}(\.[^.]+)$/.exec(media);
+    return duplicate && !exists(media) && exists(duplicate[1]! + duplicate[2]!) ? undefined : media;
   }
   return isMedia(name) ? path : undefined;
 }

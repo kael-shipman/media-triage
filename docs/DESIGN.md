@@ -69,7 +69,10 @@ video. Units in the archive count as much as units in the inbox (section 1).
    daily, catches anything missed (`src/sync/`).
    - A unit is a media file Immich indexes and its `<file>.<ext>.xmp`, the one name Darktable reads. Other sidecar
      names (`<stem>.xmp`, a Darktable duplicate's `<stem>_01.<ext>.xmp`), hidden and temporary files, and Syncthing's
-     conflict copies aren't synced.
+     conflict copies aren't synced. A sidecar named like a duplicate's is one only if no media file has its name and
+     one has the name without the number: a Pixel's `PXL_20261031_212120738.jpg`, a camera's `DSC_0001.NEF` and a
+     filed `…_01.jpg` end the same way. (Before 2026-11-07 the watcher ignored their sidecars' changes, which only the
+     daily full pass then found.)
    - A link to a file is a media file, as Immich's library scan follows links. The full pass doesn't enter a linked
      folder: Immich does, but the daemon doesn't apply a library's exclusion patterns, and a linked folder is often
      an excluded one (`Best-Of Photos`). Before 2026-11-07 the full pass skipped linked files too, so their sidecars
@@ -428,15 +431,21 @@ copy in an account whose session isn't open isn't filed: that copy's state can't
 - **Videos' date:** they have no `DateTimeOriginal`. Use Immich's `localDateTime`, or the QuickTime dates with their
   offset.
 - **Extension:** kept as it is.
-- **Not filed, and reported:** a unit with no capture time, a unit whose archive folder is on another filesystem, and
-  a photo with Darktable duplicates (`<stem>_01.<ext>.xmp`): moving only its own sidecar would leave theirs as orphans,
-  which F11 would delete. (`src/filing/plan.ts`)
+- **Not filed, and reported:** a unit with no capture time, and a unit whose archive folder is on another filesystem.
+  (`src/filing/plan.ts`)
 
 **Moving:**
 - **The sidecar** moves with its file, renamed `<new name>.<ext>.xmp`.
+- **Darktable's duplicates** (their sidecars, `<stem>_01.<ext>.xmp` and so on: a duplicate has no file of its own) move
+  with their photo and keep their numbers: `<new name>_01.<ext>.xmp`. A name like a duplicate's is one only if no media
+  file has that name: a photo can be called `<stem>_01.<ext>`. The unit's collision number is one at which the
+  duplicates' new names, as files and as sidecars, are free too, since `<new name>_01.<ext>.xmp` would otherwise be the
+  sidecar of a photo filed earlier as `<new name>_01.<ext>`. (Decided by the author, 2026-11-07; before, such a photo
+  wasn't filed.)
 - **A Live Photo's video** (Immich's `livePhotoVideoId`, or failing that the same base name) goes with its photo, into
   `Pictures`, under the photo's new base name.
-- **`Promote` is removed** from the sidecar before the move, so the new asset arrives without it. The title stays.
+- **`Promote` is removed** from the sidecar, and from the duplicates', before the move, so the new asset arrives
+  without it. The title stays.
 - **Never overwrite, and never delete the source before the destination exists:** use `link()` then `unlink()`.
   Refuse to move between filesystems.
 - **Plan a whole batch** before moving anything, so an interrupted run can be finished or undone on the next one.
@@ -778,3 +787,5 @@ with what changed, not with the size of the archive.
   (section 5): embedded tags since reorganized in Darktable came back into it, and photos without any capture time
   got the file's. The image file's own tags and date are now read where Immich may show them. The full pass also
   counts links to files (section 3).
+- 2026-11-07: filing moves a photo's Darktable duplicates' sidecars with it (section 7; decided by the author), and the
+  watcher no longer takes every sidecar named `…_<digits>.<ext>.xmp` for a duplicate's (section 3).

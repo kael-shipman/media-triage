@@ -121,23 +121,18 @@ function identity(path: string): string | undefined {
  * is looked at afresh next time. Finishing a plan cut short reads the sidecar as it is.
  */
 async function fileUnit(ctx: ReconcileContext, filings: FilingStore, plan: UnitPlan, ready?: Sidecar): Promise<{ problem?: string }> {
-  // 1. Promote and Promote/Needs a title out of the sidecar, wherever it is now, so the new copies arrive without them.
-  // exiftool writes a new file, so a sidecar already linked at its new name loses its old name first.
+  // 1. Promote and Promote/Needs a title out of the sidecar, and its Darktable duplicates', wherever each is now, so the
+  // new copies arrive without them. exiftool writes a new file, so a sidecar already linked at its new name loses its
+  // old name first.
   const untouched = plan.moves.every((move) => identity(move.from) && !identity(move.to));
-  const sidecarMove = plan.moves.find((move) => move.from === `${plan.unit}.xmp`);
-  if (sidecarMove) {
-    const [from, to] = [identity(sidecarMove.from), identity(sidecarMove.to)];
-    if (from && from === to) unlinkSync(sidecarMove.from);
-    const sidecar = ready ?? (await readSidecar(ctx.exiftool, from && from !== to ? sidecarMove.from : sidecarMove.to));
-    if (sidecar) {
-      const before = darktableReads(sidecar.fields).tags;
-      const tags = before.filter((tag) => tag !== PROMOTE_TAG && tag !== NEEDS_TITLE_TAG);
-      const changed = ready !== undefined && !sameStamp(stampOf(ready.path), ready.stamp);
-      if (changed || (tags.length !== before.length && (await writeSidecar(ctx.exiftool, sidecar, { tags })).status === "changed-meanwhile")) {
-        // Someone is at it: if nothing has moved yet, the unit is looked at afresh, ready or not, next time.
-        if (untouched) filings.forget(plan.unit);
-        return { problem: "its sidecar changed just before it was moved" };
-      }
+  const sidecar = `${plan.unit}.xmp`;
+  const sidecarMoves = plan.moves.filter((move) => move.from === sidecar || isDuplicateSidecar(plan.unit, move.from));
+  for (const move of sidecarMoves) {
+    const changed = await withoutPromote(ctx, move, move.from === sidecar ? ready : undefined);
+    if (changed) {
+      // Someone is at it: if nothing has moved yet, the unit is looked at afresh, ready or not, next time.
+      if (untouched) filings.forget(plan.unit);
+      return { problem: "its sidecar changed just before it was moved" };
     }
   }
 
@@ -163,6 +158,29 @@ async function fileUnit(ctx: ReconcileContext, filings: FilingStore, plan: UnitP
   filings.setStatus(plan.unit, "restoring");
   log.info("filed", { unit: plan.unit, to: plan.destination, files: plan.moves.length });
   return {};
+}
+
+/** Whether a path is one of a media file's Darktable duplicates' sidecars: `<stem>_01.<ext>.xmp` beside `<stem>.<ext>`. */
+function isDuplicateSidecar(unit: string, path: string): boolean {
+  const extension = extname(unit);
+  const stem = basename(unit, extension);
+  return dirname(path) === dirname(unit) && new RegExp(`^${RegExp.escape(stem)}_\\d{2,}${RegExp.escape(extension)}\\.xmp$`).test(basename(path));
+}
+
+/**
+ * Takes Promote and Promote/Needs a title out of one sidecar about to move, at its old name or its new one. True if it
+ * changed meanwhile: `ready` (the sidecar as it was when the unit was found ready) has changed since, or it changed
+ * while being written.
+ */
+async function withoutPromote(ctx: ReconcileContext, move: Move, ready?: Sidecar): Promise<boolean> {
+  const [from, to] = [identity(move.from), identity(move.to)];
+  if (from && from === to) unlinkSync(move.from);
+  const sidecar = ready ?? (await readSidecar(ctx.exiftool, from && from !== to ? move.from : move.to));
+  if (!sidecar) return false;
+  if (ready !== undefined && !sameStamp(stampOf(ready.path), ready.stamp)) return true;
+  const before = darktableReads(sidecar.fields).tags;
+  const tags = before.filter((tag) => tag !== PROMOTE_TAG && tag !== NEEDS_TITLE_TAG);
+  return tags.length !== before.length && (await writeSidecar(ctx.exiftool, sidecar, { tags })).status === "changed-meanwhile";
 }
 
 function fail(filings: FilingStore, plan: UnitPlan, problem: string): { problem: string } {

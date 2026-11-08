@@ -3,6 +3,8 @@
 //   <root>/YYYY.MM.DD - <Title>/YYYY.MM.DD-HH.MM.SS - <Creator>.<ext>
 // with "_01", "_02", … before the extension when a name is taken.
 
+import { extname } from "node:path";
+
 export const PROMOTE_TAG = "Promote";
 export const NEEDS_TITLE_TAG = "Promote/Needs a title";
 /** Darktable's fallback for $(CREATOR-unknown creator). */
@@ -63,13 +65,21 @@ export function sidecarName(file: string): string {
   return `${file}.xmp`;
 }
 
+/** The name Darktable gives a file's duplicate: "IMG_1_01.jpg" for "IMG_1.jpg" and "01". Its sidecar is that, ".xmp". */
+export function duplicateName(file: string, number: string): string {
+  const extension = extname(file);
+  return `${file.slice(0, file.length - extension.length)}_${number}${extension}`;
+}
+
 /**
  * The lowest collision number at which every file of a unit (a photo, and a Live Photo's video) and their sidecars
- * are free. Keeping one number for the whole unit keeps a Live Photo's two files paired by name.
+ * are free, and the names of the first file's Darktable duplicates (`duplicates`, their numbers: "01", …) too, with
+ * their sidecars. Keeping one number for the whole unit keeps a Live Photo's two files paired by name.
  */
-export function freeCollision(stem: string, extensions: string[], taken: (name: string) => boolean): number {
+export function freeCollision(stem: string, extensions: string[], taken: (name: string) => boolean, duplicates: readonly string[] = []): number {
   for (let collision = 0; ; collision++) {
     const names = extensions.map((extension) => fileName(stem, extension, collision));
-    if (names.every((name) => !taken(name) && !taken(sidecarName(name)))) return collision;
+    const copies = duplicates.map((number) => duplicateName(names[0]!, number));
+    if ([...names, ...copies].every((name) => !taken(name) && !taken(sidecarName(name)))) return collision;
   }
 }

@@ -8,12 +8,12 @@ you're about to build would change it, ask the author first.
 session stops partway. Each step ends with tests passing, the type check clean, a commit and a push; CI must stay
 green.
 
-**Last updated:** 2026-11-07 (`v0.1.1`: fixes from the first dry run). **All 8 milestones are done** (the last,
+**Last updated:** 2026-11-08 (`v0.1.2`: filing moves Darktable duplicates; the watcher sees `…_<digits>` names). **All 8 milestones are done** (the last,
 filing, on 2026-11-05), and the first run over a real archive was checked and four ways it could lose data were fixed
 ("Checked before the first real run", below). `v0.1.0` was installed on the author's server and dry-run over their
 archive on 2026-11-07, which found two ways the first run would write wrong values, fixed in `v0.1.1` ("The first dry
-run", below). `v0.1.1`'s dry run there was good, and the author approved going live: **next is the first live run**
-(below), which the author starts.
+run", below). `v0.1.1`'s dry run there was good, and **it's been live on the author's server since 2026-11-07**.
+`v0.1.2` (2026-11-08, "After going live", below) reaches it by the daemon's own upgrade.
 
 ## Working on it
 
@@ -45,7 +45,8 @@ run", below). `v0.1.1`'s dry run there was good, and the author approved going l
 - **Immich's source**, for checking behavior: the fork's clone at `~/Desktop/tmp-repos/immich`, branch `twins`, based
   on v3.3.5. Look in `server/src`: `controllers/`, `dtos/`, `services/`, `repositories/`. Use Immich only through
   its API, never its database.
-- **Releases:** `v0.1.1` (2026-11-07, the fixes from the first dry run on the author's archive), `v0.1.0`
+- **Releases:** `v0.1.2` (2026-11-08, duplicates filed, the watcher's names), `v0.1.1` (2026-11-07, the fixes from the
+  first dry run on the author's archive), `v0.1.0`
   (2026-11-07, everything through milestone 8 and the fixes of 2026-11-05), and the
   pre-releases `v0.1.0-rc.1` and `rc.2`, from milestone 1 only. Pushing a tag `vX.Y.Z` publishes a release
   (DESIGN.md section 10). Don't tag a release without the author.
@@ -174,6 +175,20 @@ and the libraries matched. It found, by reading the planned writes against the f
   named faces), no date for a photo without one, the real orphans only; about 12,900 sidecars to write on the first
   run. One harmless error: the sync stream's connection reset once, and the next run reads it again (a live run from
   its last acknowledged batch). **Worth doing:** log a dropped connection as a warning, and retry it at once.
+
+## After going live (2026-11-08)
+
+- **Filing moves Darktable duplicates** (decided by the author): a photo's `<stem>_01.<ext>.xmp` and so on go with
+  it, keeping their numbers, without `Promote`. Before, such a photo wasn't filed. A name like a duplicate's counts as
+  one only if no media file has it, and the collision number keeps the duplicates' new names free (DESIGN.md
+  section 7). Tests: `src/filing/plan.test.ts`, `file.test.ts`.
+- **The watcher took every `…_<digits>.<ext>.xmp` for a duplicate's** and ignored it: every Pixel photo
+  (`PXL_20261031_212120738.jpg`), camera names like `DSC_0001.NEF`, and filed `…_01.jpg` photos. So a change made in
+  Darktable to one of those reached Immich, and filing, only at the next daily full pass or stream event. Fixed:
+  `unitOf` looks at the disk, as `sidecarOwner` does (DESIGN.md section 3; three new cases in `watch.test.ts`, which
+  failed before).
+- The author's Immich fork now has the F1 patch (`IMMICH_FIND_NEW_SIDECARS`, `v3.3.6`); `reads_new_sidecars = true`
+  once the server runs it.
 
 ## Next: running it for real
 
