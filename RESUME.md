@@ -8,15 +8,16 @@ you're about to build would change it, ask the author first.
 session stops partway. Each step ends with tests passing, the type check clean, a commit and a push; CI must stay
 green.
 
-**Last updated:** 2026-11-07 (`v0.1.0` released). **All 8 milestones are done** (the last, filing, on 2026-11-05),
-and the first run over a real archive was checked and four ways it could lose data were fixed ("Checked before the
-first real run", below). Nothing has run against the author's real files or server yet. **Next is running it for
-real** (below), which the author approves or does.
+**Last updated:** 2026-11-07 (`v0.1.1`: fixes from the first dry run). **All 8 milestones are done** (the last,
+filing, on 2026-11-05), and the first run over a real archive was checked and four ways it could lose data were fixed
+("Checked before the first real run", below). `v0.1.0` was installed on the author's server and dry-run over their
+archive on 2026-11-07, which found two ways the first run would write wrong values, fixed in `v0.1.1` ("The first dry
+run", below). **Next is running it for real** (below), which the author approves or does.
 
 ## Working on it
 
 - **Bun 1.4** runs and builds it. Without Bun installed, `npx --yes bun@1.4.4` stands in for `bun`:
-  - `bun test`: the unit tests (397; 395 in CI, which skips the two that need Darktable), and the integration tests,
+  - `bun test`: the unit tests (404; 402 in CI, which skips the two that need Darktable), and the integration tests,
     skipped;
   - `bun run typecheck`: TypeScript, over `src/`, `scripts/` and `test/`;
   - `bun run build [version]`: executables for linux-x64 and linux-arm64 in `dist/` (`TARGETS=linux-x64` for one).
@@ -24,7 +25,7 @@ real** (below), which the author approves or does.
   `127.0.0.1:2284`, with made-up users (`alex@example.com`, the admin, and `sam@example.com`).
   - `bun run immich up` starts it (about a minute) and `bun run immich down` deletes everything. Leave it down when
     you stop: its database is in memory anyway.
-  - `MEDIA_TRIAGE_IMMICH_TESTS=1 bun test` runs everything against it (452 tests). Run it twice in a row on one
+  - `MEDIA_TRIAGE_IMMICH_TESTS=1 bun test` runs everything against it (462 tests). Run it twice in a row on one
     instance before calling a step done: tests must not depend on what other tests left behind.
   - `bun test/immich/smoke.ts` is the daemon's smoke test (about 5 minutes): it runs `media-triage run` itself, with
     two fresh accounts, and checks that it files a batch end to end (the file's header says what it does). Run it
@@ -43,7 +44,8 @@ real** (below), which the author approves or does.
 - **Immich's source**, for checking behavior: the fork's clone at `~/Desktop/tmp-repos/immich`, branch `twins`, based
   on v3.3.5. Look in `server/src`: `controllers/`, `dtos/`, `services/`, `repositories/`. Use Immich only through
   its API, never its database.
-- **Releases:** `v0.1.0` (2026-11-07, everything through milestone 8 and the fixes of 2026-11-05), and the
+- **Releases:** `v0.1.1` (2026-11-07, the fixes from the first dry run on the author's archive), `v0.1.0`
+  (2026-11-07, everything through milestone 8 and the fixes of 2026-11-05), and the
   pre-releases `v0.1.0-rc.1` and `rc.2`, from milestone 1 only. Pushing a tag `vX.Y.Z` publishes a release
   (DESIGN.md section 10). Don't tag a release without the author.
 
@@ -148,7 +150,25 @@ Read every path the first run takes over an archive Immich already indexed, then
   - Darktable's duplicates' sidecars, a `name.xmp` sidecar and two orphans were left byte for byte as they were.
 - **Known, not data loss:** where a sidecar has no `TagsList` and the image file embeds one, Immich shows the file's,
   so `copyInStep` never holds and that copy is refreshed again each time its unit is reconciled (an hour apart at
-  most). Writing `TagsList` there too would end it.
+  most). **Fixed in `v0.1.1`:** `TagsList` is written there too (next section).
+
+## The first dry run (2026-11-07)
+
+`v0.1.0`, on the author's server, over about 20,000 photos and videos. It changed nothing (no file's ctime moved),
+and the libraries matched. It found, by reading the planned writes against the files (DESIGN.md section 5):
+- **Embedded tags came back into Darktable:** older JPEGs embed a `TagsList` from another program, with tags since
+  reorganized in Darktable. Immich showed those, and the first run's union added them to Darktable's fields: about
+  900 photos would have regained old `People|Family|…` tags. **Fixed:** the image file's own tags are read
+  (`Exiftool.readImage`); on first contact a copy's tag the image embeds, and Darktable's fields don't hold, isn't an
+  addition; and `TagsList` is written where Immich would show the image's tags (`Wanted.tagsList`).
+- **Made-up capture dates:** with no date in the image or the sidecar, Immich's date is the file's time, and the merge
+  wrote it as the capture time (16 archive photos, 147 inbox files). **Fixed:** a copy's date isn't a side then.
+- **False orphans:** 86 sidecars beside links to files, which Immich indexes and the full pass skipped. Never deleted
+  (the last check before deleting lists links), but reported and reconciled each pass. **Fixed:** links to files count.
+- Tests: three in `src/sync/first-contact.test.ts`, each failing before its fix; unit tests for the image facts,
+  `planWrite`'s `tagsList`, and the full pass's links.
+- **What a dry run doesn't show:** filing (it looks for `Promote` in recorded units, and a dry run records none), and
+  more than the first 20 writes per batch. Its warnings and errors are on stderr: capture with `2>&1`.
 
 ## Next: running it for real
 
@@ -165,8 +185,9 @@ patch can be written before that.
    - **Libraries are matched by owner and name:** the configuration's names and folders must be the existing
      libraries', or upkeep creates new ones (a second copy of everything) or changes their folders. The dry run
      says "would create library" or "would update library … folders" if they don't match: none should appear.
-   - The dry run lists the conflicts (titles with a `/`), the orphans it leaves alone, what it would file, and the
-     first 20 sidecars it would write. It doesn't count what it would write per field.
+   - The dry run lists the conflicts (titles with a `/`), the orphans it leaves alone, and the first 20 sidecars it
+     would write in each batch, with warnings on stderr. It doesn't count what it would write per field, and can't
+     show filing on a fresh state (DESIGN.md section 7).
    - The first live run writes most sidecars once (the title's tag for Immich, the capture time's zone), and asks
      Immich to re-read each. Darktable then lists them at its next start, to reload.
    - An account added later (a second account's libraries) is safe to add while sync runs: its copies take each

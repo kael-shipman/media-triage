@@ -1,6 +1,6 @@
 {
   "name": "media-triage",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Keeps a photo inbox, an archive, Immich and Darktable in step, and files triaged photos",
   "license": "MIT",
   "private": true,
