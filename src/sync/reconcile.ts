@@ -20,7 +20,7 @@ import { type Base, type Side, type SideValues, mergeUnit, normalizeDescription,
 import { isDarktableInternalInImmich, sameTags } from "../core/tags.ts";
 import { withTitle } from "../core/titles.ts";
 import { PROMOTE_TAG } from "../core/naming.ts";
-import { type AccountState, type Wanted, type XmpFields, darktableReads, dateFromImmich, immichReads, offsetFromImmich, sameDate } from "../core/xmp.ts";
+import { type AccountState, type ImageFacts, type Wanted, type XmpFields, darktableReads, dateFromImmich, hasDate, imageTags, immichReads, immichReadsImageTags, offsetFromImmich, sameDate } from "../core/xmp.ts";
 import { type Asset, getAsset, refreshMetadata, restoreAssets, trashAssets } from "../immich/assets.ts";
 import { log } from "../log.ts";
 import type { Exiftool } from "../sidecars/exiftool.ts";
@@ -330,6 +330,19 @@ async function reconcileUnit(
   }
 
   const base: Base | undefined = previous?.synced;
+
+  // The image file's own tags and date, where Immich may show them instead of the sidecar's (section 5): on first
+  // contact, where the sidecar has no `TagsList`, and where it has no date.
+  const image: ImageFacts | undefined =
+    copies.length > 0 && (base === undefined || fields?.tagsList === undefined || !hasDate(fields)) ? await exiftool.readImage(unit) : undefined;
+  // On first contact, a tag a copy holds only because the image file embeds it isn't one added in Immich: an edit there
+  // writes `TagsList` to the sidecar. The sidecar decides those, as Darktable read them from the image at import.
+  // Otherwise the union would bring back every embedded tag since reorganized in Darktable.
+  const embedded = base === undefined && fields && image ? new Set(imageTags(image)) : undefined;
+  const darktableTags = embedded && fields ? new Set(darktableValues(fields).tags) : undefined;
+  // Without a date in the sidecar or the image, Immich's is the file's own time (`getDates`): not a capture time.
+  const datelessImage = !hasDate(fields) && !image?.hasDate;
+
   const catchingUp = new Set(copies.filter((copy) => isCatchingUp(ctx.refreshing, copy, fields)).map((copy) => copy.asset.id));
   // A copy the last sync didn't see may have read an older sidecar: once there's a base, it isn't a side for the
   // sidecar's values until it holds what the sidecar says. Otherwise a tag it never had, such as the title tag the
@@ -341,6 +354,8 @@ async function reconcileUnit(
   }
   const sides: Side[] = copies.map((copy) => {
     const values = copyValues(copy.asset);
+    if (embedded && values.tags) values.tags = values.tags.filter((tag) => !embedded.has(tag) || darktableTags!.has(tag));
+    if (datelessImage) delete values.date;
     // A copy catching up still says whether it's in the trash: that's not from the sidecar.
     // What it said at the last sync: a value it still holds isn't a change (a copy that hasn't read the sidecar, F1,
     // or can't show a reject, keeps saying the same). A copy the last sync didn't see proposes nothing, its trash
@@ -392,6 +407,7 @@ async function reconcileUnit(
   let stamp = sidecar?.stamp;
   if (fields) {
     const wanted: Wanted = { tags: merged.tags, title: merged.title };
+    if (image && immichReadsImageTags(fields, image)) wanted.tagsList = true;
     if (normalizeRating(fields.rating) !== merged.rating) wanted.rating = merged.rating;
     if (normalizeDescription(fields.description) !== merged.description) wanted.description = merged.description;
     if (merged.date !== null) {

@@ -8,10 +8,10 @@
 // - Fields are read and written by their group-qualified names, without MWG's composite tags (`useMWG: false`).
 
 import { ExifTool, ExifToolTask, type WriteTags } from "exiftool-vendored";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { type Assignments, TAGS, type XmpFields, parseXmp } from "../core/xmp.ts";
+import { type Assignments, IMAGE_TAGS, type ImageFacts, TAGS, type XmpFields, parseImage, parseXmp } from "../core/xmp.ts";
 import { IS_COMPILED } from "../version.ts";
 import { exiftoolConfig } from "./namespace.ts";
 
@@ -24,14 +24,28 @@ const INSTALL = "Install it from the system's packages: Debian's and Ubuntu's is
 const READ_ARGS = ["-charset", "filename=utf8", "-json", "-G1", "-struct", "-n", ...Object.values(TAGS).map((tag) => `-${tag}`)];
 
 /**
+ * From an image file, the fields Immich reads its tags and date from. `-fast` skips looking for trailers after the
+ * image, where none of them is kept.
+ */
+const IMAGE_ARGS = [
+  "-charset",
+  "filename=utf8",
+  "-json",
+  "-G1",
+  "-n",
+  "-fast",
+  ...[IMAGE_TAGS.tagsList, IMAGE_TAGS.hierarchicalSubject, IMAGE_TAGS.keywords, ...IMAGE_TAGS.dates].map((tag) => `-${tag}`),
+];
+
+/**
  * Reads the daemon's fields from one file. exiftool's JSON leaves out the quotes around any value that looks like a
  * number, so a title "1.50" would read as 1.5. Every number is kept as the text exiftool wrote instead, which is the
  * value as it is in the file. (Newer exiftools can quote them, with `-api StructFormat=JSONQ`, but 12.76, Ubuntu 24.04's,
  * ignores that.)
  */
 class ReadTask extends ExifToolTask<Record<string, unknown>> {
-  constructor(file: string) {
-    super([...READ_ARGS, file]);
+  constructor(file: string, args: readonly string[] = READ_ARGS) {
+    super([...args, file]);
   }
 
   protected parse(input: string, error?: Error): Record<string, unknown> {
@@ -89,6 +103,9 @@ async function versionOf(path: string): Promise<string> {
 
 /** A running exiftool, with the daemon's namespace defined. Close it when done. */
 export class Exiftool {
+  /** Image facts already read, by path, with the file's size and mtime then: images rarely change. */
+  private readonly images = new Map<string, { size: number; mtimeMs: number; facts: ImageFacts }>();
+
   private constructor(
     private readonly process: ExifTool,
     private readonly configDir: string,
@@ -122,6 +139,28 @@ export class Exiftool {
       return parseXmp(await this.process.enqueueTask(() => new ReadTask(file)));
     } catch (error) {
       throw new Error(`exiftool couldn't read ${file}: ${(error as Error).message}`);
+    }
+  }
+
+  /**
+   * What an image file embeds that Immich reads: its tags and whether it has a capture time. A file exiftool can't make
+   * sense of has neither, for Immich too. Undefined when the file is gone or exiftool fails.
+   */
+  async readImage(file: string): Promise<ImageFacts | undefined> {
+    let stat: { size: number; mtimeMs: number };
+    try {
+      stat = statSync(file);
+    } catch {
+      return undefined;
+    }
+    const known = this.images.get(file);
+    if (known && known.size === stat.size && known.mtimeMs === stat.mtimeMs) return known.facts;
+    try {
+      const facts = parseImage(await this.process.enqueueTask(() => new ReadTask(file, IMAGE_ARGS)));
+      this.images.set(file, { size: stat.size, mtimeMs: stat.mtimeMs, facts });
+      return facts;
+    } catch {
+      return undefined;
     }
   }
 

@@ -70,6 +70,10 @@ video. Units in the archive count as much as units in the inbox (section 1).
    - A unit is a media file Immich indexes and its `<file>.<ext>.xmp`, the one name Darktable reads. Other sidecar
      names (`<stem>.xmp`, a Darktable duplicate's `<stem>_01.<ext>.xmp`), hidden and temporary files, and Syncthing's
      conflict copies aren't synced.
+   - A link to a file is a media file, as Immich's library scan follows links. The full pass doesn't enter a linked
+     folder: Immich does, but the daemon doesn't apply a library's exclusion patterns, and a linked folder is often
+     an excluded one (`Best-Of Photos`). Before 2026-11-07 the full pass skipped linked files too, so their sidecars
+     were reported as orphans.
    - Bun's recursive `fs.watch` watches every folder, new ones included, with one inotify instance. Changes are acted
      on once a unit has been quiet for a moment, since a sidecar can be written in several steps.
 2. **Immich, per account: its sync stream** (`POST /api/sync/stream`), the feed of changes the phone apps use. It
@@ -179,6 +183,21 @@ If the state is lost, merge as a union, which never drops a tag, and report it.
   A copy the last sync didn't see (a new account's library, a copy learned late) proposes nothing at all, its trash
   included: it takes the unit's state. Otherwise a new account's copy of a photo in the trash, itself not trashed,
   read as a restore, and took the photo out of the trash for everyone.
+- **The image file's own metadata shows in Immich where the sidecar lacks a field.** Immich reads the image, then lays
+  the sidecar's fields over it, field by field (`metadata.service.ts`, `getExifTags`). So an older JPEG that embeds a
+  `TagsList` (written by another program, years ago) shows that list in Immich, over Darktable's
+  `HierarchicalSubject`, and a photo with no capture time in the image or the sidecar shows the file's own time
+  (`getDates`). The daemon reads the image's tag fields and capture time (`Exiftool.readImage`, cached by the file's
+  size and mtime) on first contact, where the sidecar has no `TagsList`, and where it has no date:
+  - **On first contact, a tag a copy holds only because the image embeds it isn't an addition.** An edit in Immich
+    writes `TagsList` to the sidecar, so those tags come from the image, and Darktable read the same tags from it at
+    import: the sidecar decides them. Otherwise the union would bring back into Darktable every embedded tag since
+    reorganized there. Found in the first dry run on the author's archive (2026-11-07): about 900 photos would have
+    regained `People|Family|<name>` tags moved in Darktable years before.
+  - **`TagsList` is written where Immich would show the image's tags** (F4).
+  - **Without a date in the sidecar or the image, a copy's date isn't a side:** it's the file's time, not a capture
+    time. Found in the same dry run: 16 archive photos and 147 inbox files would have been given their file's time
+    as a capture time. Filing still dates such a unit by Immich's (section 7).
 - **Without a base** (the first sync, or a lost state): the union of tags, which never drops one, and for the rating,
   description, date and GPS, the sidecar's value, or the latest copy's where the sidecar has none. Every edit made in
   Immich is written to the sidecar, so a copy that differs from it hasn't read it: on the first run, a change made in
@@ -207,8 +226,9 @@ If the state is lost, merge as a union, which never drops a tag, and report it.
   change the watcher sees, reading each account's stream (a batch is reconciled before it's acknowledged), then up to
   200 units that have been quiet for 2 seconds, so a first run over the whole archive doesn't hold up other jobs.
   Without exiftool, the daemon stops, saying how to install it.
-- **A dry run** reads and merges, logs what it would write, and writes, records and acknowledges nothing. It reads
-  each stream once per start, since unacknowledged streams would otherwise be read whole each minute.
+- **A dry run** reads and merges, logs what it would write (the first 20 sidecars of each batch), and writes, records
+  and acknowledges nothing. Its warnings and errors go to stderr, so capture both (`2>&1`). It reads each stream once
+  per start, since unacknowledged streams would otherwise be read whole each minute.
 
 ## 6. Sync rules
 
@@ -240,8 +260,10 @@ If the state is lost, merge as a union, which never drops a tag, and report it.
   - **Translating:** split on `|`, turn each `/` inside a part into `|`, and join with `/`. That's Immich's own
     conversion (`getTagList`), so a Darktable tag `Music|AC/DC` is `Music/AC|DC` in Immich. The reverse undoes it.
   - Write `TagsList` where it already exists, and where there's a title: Immich's tags hold the title as a tag (F3),
-    which Darktable's fields don't, and without `TagsList` Immich reads `HierarchicalSubject`. Otherwise the sidecars
-    Darktable wrote need no change.
+    which Darktable's fields don't, and without `TagsList` Immich reads `HierarchicalSubject`. Also where the image
+    file embeds tags Immich would show instead (section 5): a `TagsList`, or any tags when the sidecar has none.
+    Otherwise the sidecars Darktable wrote need no change. Not handled: an image whose embedded tags Darktable's
+    fields don't hold at all, since an empty `TagsList` can't be written; Immich keeps showing them.
   - Leave out Darktable's own `darktable|…` tags. Immich reads them too when there's no `TagsList`, and shows
     `darktable/format/jpg`, so they're left out on both sides. They're never added or removed in any field: a write
     keeps the ones each field had.
@@ -478,7 +500,8 @@ waiting out the settle time): it reconciles the inbox units tagged `Promote`, th
 - **Immich is asked to scan** the libraries holding the old and new paths (with the admin's session), since it
   notices neither the new files nor the old ones going until a scan. Without the admin's session, it sees them at its
   next scheduled scan.
-- **A dry run** logs what it would file, where, and moves nothing.
+- **A dry run** logs what it would file, where, and moves nothing. It looks for `Promote` in the units a live run
+  recorded, so a dry run on a fresh state files nothing: check the inbox's sidecars for `Promote` instead.
 
 ## 8. Account upkeep
 
@@ -751,3 +774,7 @@ with what changed, not with the size of the archive.
   run, a Darktable change Immich hadn't read lost to Immich's older value; and a new account's copy of a trashed photo
   restored it. Each copy is now compared with what it said itself at the last sync, a copy the last sync didn't see
   takes the unit's state, and without a base the sidecar's values come first.
+- 2026-11-07: the first dry run on the author's archive found two ways the first run would write wrong values, fixed
+  (section 5): embedded tags since reorganized in Darktable came back into it, and photos without any capture time
+  got the file's. The image file's own tags and date are now read where Immich may show them. The full pass also
+  counts links to files (section 3).

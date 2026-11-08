@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseConfig } from "../config.ts";
@@ -120,6 +120,27 @@ test("the full pass returns units without a record, or whose sidecar changed", a
   expect(await fullPass(store, [root])).toEqual({
     media: 4,
     changed: [join(root, "x", "a.jpg"), join(root, "x", "b.jpg"), join(root, "x", "new.heic")],
+    orphans: [],
+    conflicts: [],
+  });
+  state.close();
+});
+
+test("the full pass counts a link to a file as a file, as Immich does, but doesn't enter a linked folder", async () => {
+  const state = State.open(join(dir, "state"));
+  const store = new SyncStore(state.db);
+  const root = join(dir, "media");
+  touch(join(root, "logos", "a", "logo.gif"));
+  touch(join(root, "elsewhere", "b.jpg"));
+  mkdirSync(join(root, "logos", "all"));
+  symlinkSync("../a/logo.gif", join(root, "logos", "all", "logo.gif"));
+  touch(join(root, "logos", "all", "logo.gif.xmp"));
+  symlinkSync("../missing.gif", join(root, "logos", "all", "broken.gif"));
+  symlinkSync("../elsewhere", join(root, "logos", "linked"));
+  // The linked file's sidecar has its media file beside it: not an orphan.
+  expect(await fullPass(store, [root])).toEqual({
+    media: 3,
+    changed: [join(root, "elsewhere", "b.jpg"), join(root, "logos", "a", "logo.gif"), join(root, "logos", "all", "logo.gif")],
     orphans: [],
     conflicts: [],
   });

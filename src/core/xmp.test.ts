@@ -1,5 +1,19 @@
 import { describe, expect, test } from "bun:test";
-import { type XmpFields, TAGS, darktableReads, dateFromImmich, immichReads, offsetFromImmich, parseXmp, planWrite, sameDate } from "./xmp.ts";
+import {
+  type XmpFields,
+  TAGS,
+  darktableReads,
+  dateFromImmich,
+  hasDate,
+  imageTags,
+  immichReads,
+  immichReadsImageTags,
+  offsetFromImmich,
+  parseImage,
+  parseXmp,
+  planWrite,
+  sameDate,
+} from "./xmp.ts";
 
 /** What exiftool reads from a sidecar Darktable wrote, in the shape src/sidecars/ asks for (every value quoted). */
 const darktableRaw = {
@@ -109,6 +123,47 @@ describe("what each tool reads", () => {
   });
 });
 
+describe("the image file's own tags and date", () => {
+  test("reads the tag fields, and keywords from any group, once each", () => {
+    const image = parseImage({
+      SourceFile: "a.jpg",
+      "XMP-digiKam:TagsList": ["People/Family/Robin Example", ""],
+      "XMP-lr:HierarchicalSubject": "Places|Lake",
+      "IPTC:Keywords": ["Robin Example", "Lake"],
+      "XMP-pdf:Keywords": "Lake",
+    });
+    expect(image).toEqual({ tagsList: ["People/Family/Robin Example", ""], hierarchicalSubject: ["Places|Lake"], keywords: ["Robin Example", "Lake"], hasDate: false });
+    expect(imageTags(image).toSorted()).toEqual(["", "Lake", "People/Family/Robin Example", "Places/Lake", "Robin Example"]);
+  });
+
+  test("a capture time is a date with a time in one of the fields Immich takes one from", () => {
+    expect(parseImage({ "ExifIFD:DateTimeOriginal": "2021:06:15 10:20:30" }).hasDate).toBe(true);
+    expect(parseImage({ "QuickTime:MediaCreateDate": "2021:06:15 10:20:30" }).hasDate).toBe(true);
+    expect(parseImage({ "Composite:DateTimeCreated": "2004:01:28 12:17:19+00:00" }).hasDate).toBe(true);
+    // A date alone, zeros, and dates Immich doesn't take (the file's, a modify date) aren't.
+    expect(parseImage({ "IPTC:DateCreated": "2004:01:28" }).hasDate).toBe(false);
+    expect(parseImage({ "QuickTime:CreateDate": "0000:00:00 00:00:00" }).hasDate).toBe(false);
+    expect(parseImage({ "System:FileModifyDate": "2013:11:20 20:45:23-06:00", "IFD0:ModifyDate": "2013:11:20 20:45:23" }).hasDate).toBe(false);
+  });
+
+  test("Immich shows the image's tags where the sidecar lacks the field it would take them from", () => {
+    const darktable: XmpFields = { hierarchicalSubject: ["People|Robin Example"] };
+    expect(immichReadsImageTags(darktable, { tagsList: ["People/Family/Robin Example"], hasDate: true })).toBe(true);
+    // The sidecar's HierarchicalSubject comes before the image's, and before its keywords.
+    expect(immichReadsImageTags(darktable, { hierarchicalSubject: ["People|Family|Robin Example"], keywords: ["Robin"], hasDate: true })).toBe(false);
+    expect(immichReadsImageTags({}, { keywords: ["Robin"], hasDate: true })).toBe(true);
+    expect(immichReadsImageTags({ ...darktable, tagsList: ["People/Robin Example"] }, { tagsList: ["Old"], hasDate: true })).toBe(false);
+    expect(immichReadsImageTags(darktable, { hasDate: true })).toBe(false);
+  });
+
+  test("a sidecar's capture time is either tool's date field", () => {
+    expect(hasDate({ date: "2021:06:15 10:20:30" })).toBe(true);
+    expect(hasDate({ immichDate: "2021:06:15 10:20:30-05:00" })).toBe(true);
+    expect(hasDate({ hierarchicalSubject: ["Places|Lake"] })).toBe(false);
+    expect(hasDate(undefined)).toBe(false);
+  });
+});
+
 describe("sameDate", () => {
   test.each([
     ["2020:06:15 10:30:00.000", "2020:06:15 10:30:00", true],
@@ -173,6 +228,11 @@ describe("planWrite", () => {
       [TAGS.subject]: ["darktable", "format", "jpg", "Music", "AC/DC"],
       [TAGS.tagsList]: ["darktable/format/jpg", "Music/AC|DC"],
     });
+  });
+
+  test("TagsList is also written where Immich would otherwise show the image's tags", () => {
+    const { title: _, ...untitled } = parseXmp(darktableRaw);
+    expect(planWrite(untitled, { tags: ["Places/Lake"], tagsList: true })).toEqual({ [TAGS.tagsList]: ["Places/Lake"] });
   });
 
   test("removing every tag removes the fields that would be empty", () => {

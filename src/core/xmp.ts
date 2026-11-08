@@ -11,7 +11,7 @@
 // - the tags: Darktable's `lr:hierarchicalSubject` and `dc:subject`, and Immich's `digiKam:TagsList`, which also
 //   holds the title as a tag (F3).
 // Immich's copies are written where they already exist, and where they're needed to hold what Darktable's fields
-// can't: a date's offset, a title tag.
+// can't: a date's offset, a title tag, or tags over those the image file embeds.
 
 import { type RegionInfo } from "./regions.ts";
 import { titleTag } from "./titles.ts";
@@ -179,6 +179,77 @@ function strip(view: ToolView): ToolView {
   return view;
 }
 
+// The image file's own metadata. Immich reads the image and lays the sidecar's fields over it, field by field
+// (`metadata.service.ts`, `getExifTags`), so what the image embeds shows in Immich wherever the sidecar lacks that
+// field (section 5).
+
+/** The fields Immich reads its tags and date from, in the image file itself, as exiftool names them. */
+export const IMAGE_TAGS = {
+  tagsList: "XMP-digiKam:TagsList",
+  hierarchicalSubject: "XMP-lr:HierarchicalSubject",
+  keywords: "Keywords",
+  /** Immich's `EXIF_DATE_TAGS`, the fields it takes a capture time from, in its order. */
+  dates: [
+    "SubSecDateTimeOriginal",
+    "SubSecCreateDate",
+    "DateTimeOriginal",
+    "CreationDate",
+    "CreateDate",
+    "MediaCreateDate",
+    "DateTimeCreated",
+    "GPSDateTime",
+    "DateTimeUTC",
+    "SonyDateTime2",
+    "SourceImageCreateTime",
+  ],
+} as const;
+
+/** What an image file embeds that Immich reads: its tag fields (as written there) and whether it has a capture time. */
+export interface ImageFacts {
+  tagsList?: string[];
+  hierarchicalSubject?: string[];
+  keywords?: string[];
+  hasDate: boolean;
+}
+
+/** A date and time, as Immich takes one (an exiftool-vendored `ExifDateTime`): not a date alone, not all zeros. */
+const DATE_TIME = /^(?!0000)\d{4}:\d{2}:\d{2}[ T]\d{2}:\d{2}/;
+
+/** The image facts from exiftool's JSON for the image file (`-G1`: names with their group, which are ignored here). */
+export function parseImage(raw: Record<string, unknown>): ImageFacts {
+  // Every value of a field by its name, from any group ("IPTC:Keywords", "XMP-pdf:Keywords").
+  const named = (name: string) => Object.entries(raw).flatMap(([key, value]) => (key.slice(key.indexOf(":") + 1) === name ? [value] : []));
+  const keywords = [...new Set(named(IMAGE_TAGS.keywords).flatMap((value) => list(value) ?? []))];
+  const facts: ImageFacts = { hasDate: IMAGE_TAGS.dates.some((name) => named(name).some((value) => DATE_TIME.test(String(value)))) };
+  const tagsList = list(raw[IMAGE_TAGS.tagsList]);
+  const hierarchicalSubject = list(raw[IMAGE_TAGS.hierarchicalSubject]);
+  if (tagsList) facts.tagsList = tagsList;
+  if (hierarchicalSubject) facts.hierarchicalSubject = hierarchicalSubject;
+  if (keywords.length > 0) facts.keywords = keywords;
+  return facts;
+}
+
+/** Every tag the image file embeds, in Immich's notation: those Immich can show for it without any edit made there. */
+export function imageTags(image: ImageFacts): string[] {
+  return [...new Set([...(image.tagsList ?? []), ...(image.hierarchicalSubject ?? []).map(toImmich), ...(image.keywords ?? [])])];
+}
+
+/**
+ * Whether Immich shows the image file's tags instead of the sidecar's: Immich takes `TagsList`, then
+ * `HierarchicalSubject`, then `Keywords` (`getTagList`), each from the sidecar where it has one and else from the image.
+ * So an image's `TagsList` hides Darktable's `HierarchicalSubject`, and a sidecar with neither shows the image's tags.
+ */
+export function immichReadsImageTags(fields: XmpFields, image: ImageFacts): boolean {
+  if (fields.tagsList !== undefined) return false;
+  if (image.tagsList !== undefined) return true;
+  return fields.hierarchicalSubject === undefined && (image.hierarchicalSubject !== undefined || image.keywords !== undefined);
+}
+
+/** Whether a sidecar holds a capture time, which Immich then takes over the image's (`getExifTags`). */
+export function hasDate(fields: XmpFields | undefined): boolean {
+  return fields?.date !== undefined || fields?.immichDate !== undefined;
+}
+
 // Dates.
 
 const OFFSET = /(Z|[+-]\d{2}:?\d{2})$/;
@@ -253,6 +324,11 @@ export interface Wanted {
   creator?: string | null;
   /** In Immich's notation, without Darktable's own tags, which are left as they are in every field. */
   tags?: readonly string[];
+  /**
+   * Write the tags to `TagsList` too, though there's no title: Immich would otherwise show the image file's tags
+   * (`immichReadsImageTags`).
+   */
+  tagsList?: boolean;
   date?: string | null;
   /**
    * The capture time's offset from UTC ("+02:00"), when it's known from elsewhere (Immich, `offsetFromImmich`), for a
@@ -300,8 +376,9 @@ export function planWrite(fields: XmpFields, wanted: Wanted): Assignments {
     setList(plan, TAGS.subject, dcSubject(hierarchical), fields.subject);
     // Immich's tags hold the title as a tag (F3), which Darktable's fields don't. So `TagsList` is written where it
     // exists, and also where there's a title: without it, Immich would read Darktable's fields, and miss the title.
+    // And where the image file embeds tags Immich would show instead of Darktable's fields.
     const title = wanted.title !== undefined ? wanted.title : (fields.title ?? null);
-    if (fields.tagsList !== undefined || title !== null) {
+    if (fields.tagsList !== undefined || title !== null || wanted.tagsList) {
       const immich = [...(fields.tagsList ?? []).filter(isDarktableInternalInImmich), ...wanted.tags, ...(title !== null ? [titleTag(title)] : [])];
       setList(plan, TAGS.tagsList, immich, fields.tagsList);
     }

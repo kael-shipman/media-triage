@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FIXTURES, USERS, api, configFor, describeImmich, login, mediaFolder, newUser, waitFor } from "../../test/immich/harness.ts";
 import { PathMap } from "../core/path-map.ts";
+import type { Assignments } from "../core/xmp.ts";
 import { type Asset, getAsset } from "../immich/assets.ts";
 import { loginAccount } from "../immich/login.ts";
 import { Exiftool } from "../sidecars/exiftool.ts";
@@ -36,8 +37,9 @@ afterEach(() => {
 /**
  * A fresh account with a library over a folder holding one photo, indexed by Immich. With `sidecarAfter`, Darktable's
  * sidecar appears only after Immich indexed the photo, so Immich doesn't know it (F1); otherwise it's there first.
+ * `image` and `sidecar` are written to the photo and to Darktable's sidecar before that.
  */
-async function indexed(prefix: string, options: { sidecarAfter?: boolean; rating?: number } = {}) {
+async function indexed(prefix: string, options: { sidecarAfter?: boolean; rating?: number; image?: Assignments; sidecar?: Assignments } = {}) {
   const admin = await login(USERS.alex);
   const user = await newUser(admin.accessToken, "First");
   const folder = mediaFolder(prefix);
@@ -47,9 +49,11 @@ async function indexed(prefix: string, options: { sidecarAfter?: boolean; rating
   const account = accounts[0]!;
   const unit = join(folder.local, "photo.jpg");
   copyFileSync(join(FIXTURES, "photo.jpg"), unit);
+  if (options.image) await exiftool.write(unit, options.image);
   const sidecar = async () => {
     copyFileSync(join(FIXTURES, "darktable.xmp"), `${unit}.xmp`);
     if (options.rating !== undefined) await exiftool.write(`${unit}.xmp`, { "XMP-xmp:Rating": options.rating });
+    if (options.sidecar) await exiftool.write(`${unit}.xmp`, options.sidecar);
   };
   if (!options.sidecarAfter) await sidecar();
   const { id: library } = await api<{ id: string }>("POST", "/libraries", {
@@ -109,6 +113,51 @@ describeImmich("the first run over an archive Immich already indexed", () => {
     await twice();
     await twice();
     expect((await fields()).rating).toBe(-1);
+  }, 120_000);
+
+  test("tags the image file embeds don't come back into Darktable, and Immich then shows the sidecar's", async () => {
+    // An older JPEG, tagged by another program before the tags were reorganized in Darktable, and without a title, so
+    // nothing else would write TagsList.
+    const { twice, fields, read } = await indexed("first-embedded", {
+      image: { "XMP-digiKam:TagsList": ["People/Family/Robin Example", "Places/Lake", "Old/Tag"] },
+      sidecar: { "XMP-dc:Title": null },
+    });
+    expect((await read()).tags?.map((tag) => tag.value).toSorted()).toEqual(["Old/Tag", "People/Family/Robin Example", "Places/Lake"]);
+    await twice();
+    await twice();
+    const after = await fields();
+    expect(after.hierarchicalSubject?.toSorted()).toEqual(["People|Robin Example", "Places|Lake", "darktable|format|jpg"]);
+    expect(after.tagsList?.toSorted()).toEqual(["People/Robin Example", "Places/Lake"]);
+    await waitFor("Immich showing the sidecar's tags", async () => {
+      const tags = (await read()).tags?.map((tag) => tag.value).toSorted();
+      return tags?.join() === "People/Robin Example,Places/Lake" ? true : undefined;
+    });
+  }, 120_000);
+
+  test("a tag added in Immich to a photo whose image embeds tags still reaches Darktable", async () => {
+    const { twice, fields, token, id } = await indexed("first-embedded-added", {
+      image: { "XMP-digiKam:TagsList": ["People/Family/Robin Example"] },
+      sidecar: { "XMP-dc:Title": null },
+    });
+    const tags = await api<{ id: string; value: string }[]>("PUT", "/tags", { token: await token(), body: { tags: ["Events/Picnic"] } });
+    const picnic = tags.find((tag) => tag.value === "Events/Picnic")!;
+    await api("PUT", `/tags/${picnic.id}/assets`, { token: await token(), body: { ids: [id] } });
+    await twice();
+    await twice();
+    expect((await fields()).hierarchicalSubject?.toSorted()).toEqual(["Events|Picnic", "People|Robin Example", "Places|Lake", "darktable|format|jpg"]);
+  }, 120_000);
+
+  test("a photo with no capture time in its image or sidecar doesn't get Immich's, which is the file's time", async () => {
+    const { twice, fields, read } = await indexed("first-dateless", {
+      image: { "ExifIFD:DateTimeOriginal": null },
+      sidecar: { "XMP-exif:DateTimeOriginal": null },
+    });
+    expect((await read()).exifInfo?.dateTimeOriginal).toBeTruthy();
+    await twice();
+    await twice();
+    const after = await fields();
+    expect(after.date).toBeUndefined();
+    expect(after.immichDate).toBeUndefined();
   }, 120_000);
 
   test("a change made in Darktable that Immich hasn't read wins, though Immich updated the photo since", async () => {

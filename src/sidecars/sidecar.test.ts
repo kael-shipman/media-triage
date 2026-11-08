@@ -88,6 +88,22 @@ describe("reading", () => {
   test("no file, no sidecar", async () => {
     expect(await readSidecar(exiftool, join(dir, "missing.jpg.xmp"))).toBeUndefined();
   });
+
+  test("an image file's own tags and capture time, read again when it changes", async () => {
+    const photo = join(dir, "photo.jpg");
+    copyFileSync(join(FIXTURES, "photo.jpg"), photo);
+    expect(await exiftool.readImage(photo)).toEqual({ hasDate: true });
+    // An older photo, tagged by another program and without a capture time.
+    await exiftool.write(photo, {
+      "ExifIFD:DateTimeOriginal": null,
+      "XMP-digiKam:TagsList": ["People/Family/Robin Example"],
+      "IPTC:Keywords": ["Robin Example"],
+    });
+    expect(await exiftool.readImage(photo)).toEqual({ tagsList: ["People/Family/Robin Example"], keywords: ["Robin Example"], hasDate: false });
+    expect(await exiftool.readImage(join(dir, "missing.jpg"))).toBeUndefined();
+    writeFileSync(join(dir, "broken.jpg"), "not an image");
+    expect(await exiftool.readImage(join(dir, "broken.jpg"))).toEqual({ hasDate: false });
+  });
 });
 
 describe("writing", () => {

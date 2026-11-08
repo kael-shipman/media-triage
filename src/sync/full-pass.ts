@@ -5,6 +5,7 @@
 // sidecars, for `handleOrphans`.
 
 import fastGlob from "fast-glob";
+import { statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { isConflictCopy, isSidecar, sidecarOwner } from "../core/orphans.ts";
 import { sameStamp, stampOf } from "../sidecars/sidecar.ts";
@@ -25,8 +26,13 @@ export interface FullPass {
 export async function fullPass(store: SyncStore, folders: readonly string[]): Promise<FullPass> {
   const result: FullPass = { media: 0, changed: [], orphans: [], conflicts: [] };
   for (const folder of folders) {
-    // Hidden files and folders are left out, as Immich's libraries leave them out.
-    const files = (await fastGlob("**/*", { cwd: folder, onlyFiles: true, dot: false, followSymbolicLinks: false, suppressErrors: true })).sort();
+    // Hidden files and folders are left out, as Immich's libraries leave them out. A link to a file counts as a file,
+    // as Immich indexes it; linked folders aren't entered, since a library's exclusions aren't applied here.
+    const entries = await fastGlob("**/*", { cwd: folder, onlyFiles: false, dot: false, followSymbolicLinks: false, suppressErrors: true, objectMode: true });
+    const files = entries
+      .filter((entry) => entry.dirent.isFile() || (entry.dirent.isSymbolicLink() && isFile(join(folder, entry.path))))
+      .map((entry) => entry.path)
+      .sort();
     const names = new Map<string, string[]>();
     for (const file of files) {
       const path = join(folder, file);
@@ -49,4 +55,13 @@ export async function fullPass(store: SyncStore, folders: readonly string[]): Pr
     }
   }
   return result;
+}
+
+/** Whether a path leads to a file, following links. */
+function isFile(path: string): boolean {
+  try {
+    return statSync(path).isFile();
+  } catch {
+    return false;
+  }
 }
