@@ -12,7 +12,8 @@ green.
 filing, on 2026-11-05), and the first run over a real archive was checked and four ways it could lose data were fixed
 ("Checked before the first real run", below). `v0.1.0` was installed on the author's server and dry-run over their
 archive on 2026-11-07, which found two ways the first run would write wrong values, fixed in `v0.1.1` ("The first dry
-run", below). **Next is running it for real** (below), which the author approves or does.
+run", below). `v0.1.1`'s dry run there was good, and the author approved going live: **next is the first live run**
+(below), which the author starts.
 
 ## Working on it
 
@@ -169,6 +170,10 @@ and the libraries matched. It found, by reading the planned writes against the f
   `planWrite`'s `tagsList`, and the full pass's links.
 - **What a dry run doesn't show:** filing (it looks for `Promote` in recorded units, and a dry run records none), and
   more than the first 20 writes per batch. Its warnings and errors are on stderr: capture with `2>&1`.
+- **`v0.1.1`'s dry run** (same day): no embedded tag comes back (Darktable's tag fields are written only for F10's
+  named faces), no date for a photo without one, the real orphans only; about 12,900 sidecars to write on the first
+  run. One harmless error: the sync stream's connection reset once, and the next run reads it again (a live run from
+  its last acknowledged batch). **Worth doing:** log a dropped connection as a warning, and retry it at once.
 
 ## Next: running it for real
 
@@ -182,6 +187,8 @@ patch can be written before that.
    "Sidecar metadata, Discover" (not "Sync") makes it find and read them.
 3. **Deploying on the author's server:** install a release and exiftool, log each account in, then `run --dry-run`
    over everything (DESIGN.md section 9). The author approves the first live write and the first live filing.
+   **Done up to the start** (2026-11-07): installed, dry-run twice, approved; the service starts when the author runs
+   the server's setup script.
    - **Libraries are matched by owner and name:** the configuration's names and folders must be the existing
      libraries', or upkeep creates new ones (a second copy of everything) or changes their folders. The dry run
      says "would create library" or "would update library … folders" if they don't match: none should appear.
