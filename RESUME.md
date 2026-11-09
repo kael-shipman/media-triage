@@ -207,6 +207,10 @@ and new phone photos stayed gray behind them. The author stopped the service, th
   `TagsList` as itself: the same file was written, and every copy refreshed, on every pass. Values are now compared as
   exiftool writes them (`asWritten` in `src/core/xmp.ts`). Tests: `xmp.test.ts` and `sidecar.test.ts`.
 
+On the author's server: `v0.1.3` installed with `media-triage upgrade` (2026-11-09), and a 5-minute dry run there
+reconciled the 105 units waiting in the stream: it would write only the 6 new phone photos' sidecars (their capture
+time and GPS), and none of the looping ones. The service is started again by the author.
+
 Not changed: an account whose session was revoked is warned about on every run ("account left out of sync"); Jess's
 was revoked when her phone app was set up, and the warning repeated every few seconds. Logging it once per change
 would be quieter.
