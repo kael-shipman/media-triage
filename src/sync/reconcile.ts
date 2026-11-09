@@ -11,7 +11,8 @@
 // sidecar now (an edit in Immich rewrites the sidecar), or once its `updatedAt` changed a moment ago or more: Immich's
 // metadata extraction updates the asset, alongside its tags and EXIF (`metadata.service.ts`).
 
-import { existsSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Config } from "../config.ts";
 import { type FacesOutcome, type NamedFace, applyFaces } from "../core/faces.ts";
@@ -26,7 +27,7 @@ import { log } from "../log.ts";
 import type { Exiftool } from "../sidecars/exiftool.ts";
 import { createSidecar, readSidecar, type Sidecar, writeSidecar } from "../sidecars/sidecar.ts";
 import type { OpenAccount } from "../upkeep/accounts.ts";
-import type { AssetRecord, SyncStore, SyncedValues } from "./store.ts";
+import type { Asked, AssetRecord, SyncStore, SyncedValues } from "./store.ts";
 
 export interface ReconcileContext {
   config: Config;
@@ -51,6 +52,12 @@ const EXTRACTED_MS = 2000;
 
 /** How long a copy may take to read its sidecar after a refresh before what it says counts again. */
 export const CATCH_UP_MS = 60 * 60_000;
+
+/**
+ * How long a copy asked to read a sidecar, and not updated since, waits before it's asked again: the request may have
+ * been lost (Immich's queue emptied, say). A longer queue only waits (`askable`).
+ */
+export const ASK_AGAIN_MS = 24 * 60 * 60_000;
 
 export interface ReconcileReport {
   units: number;
@@ -232,16 +239,16 @@ export async function reconcile(ctx: ReconcileContext, units: readonly string[])
   const trash = new Map<OpenAccount, Set<string>>();
   const restore = new Map<OpenAccount, Set<string>>();
   const add = (map: Map<OpenAccount, Set<string>>, account: OpenAccount, id: string) => map.set(account, (map.get(account) ?? new Set()).add(id));
-  const asked = new Map<string, { fields: XmpFields; updatedAt: string }>();
+  const asked = new Map<string, { unit: string; fields: XmpFields; updatedAt: string; sidecar: string | undefined }>();
   // Copies never looked at again since they were asked would otherwise be kept for good.
   for (const [id, { at }] of ctx.refreshing) if (Date.now() - at >= CATCH_UP_MS) ctx.refreshing.delete(id);
 
   for (const unit of units) {
     try {
       await reconcileUnit(ctx, unit, report, {
-        refresh: (copy, fields) => {
+        refresh: (copy, fields, sidecar) => {
           add(refresh, copy.account, copy.asset.id);
-          asked.set(copy.asset.id, { fields, updatedAt: copy.asset.updatedAt });
+          asked.set(copy.asset.id, { unit, fields, updatedAt: copy.asset.updatedAt, sidecar });
         },
         trash: (copy) => add(trash, copy.account, copy.asset.id),
         restore: (copy) => add(restore, copy.account, copy.asset.id),
@@ -265,7 +272,11 @@ export async function reconcile(ctx: ReconcileContext, units: readonly string[])
     if (ctx.dryRun) continue;
     await refreshMetadata(account.client, [...ids]);
     const now = Date.now();
-    for (const id of ids) ctx.refreshing.set(id, { at: now, ...asked.get(id)! });
+    for (const id of ids) {
+      const { fields, updatedAt } = asked.get(id)!;
+      ctx.refreshing.set(id, { at: now, fields, updatedAt });
+    }
+    recordAsked(ctx.store, [...ids].map((id) => ({ id, ...asked.get(id)! })), new Date(now).toISOString());
   }
 
   if (report.written.length + report.created.length + report.refreshed + report.trashed.length + report.restored.length + report.conflicts.length > 0) {
@@ -291,11 +302,33 @@ export async function reconcile(ctx: ReconcileContext, units: readonly string[])
   return report;
 }
 
+/** Records, once Immich took the requests, which sidecar each copy was asked to read, in its unit's record. */
+function recordAsked(store: SyncStore, copies: { id: string; unit: string; updatedAt: string; sidecar: string | undefined }[], at: string): void {
+  const byUnit = new Map<string, Record<string, Asked>>();
+  for (const { id, unit, updatedAt, sidecar } of copies) {
+    if (sidecar !== undefined) byUnit.set(unit, { ...byUnit.get(unit), [id]: { sidecar, updatedAt, at } });
+  }
+  const records = [...byUnit].flatMap(([unit, asked]) => {
+    const record = store.unit(unit);
+    return record ? [{ ...record, synced: { ...record.synced, asked: { ...record.synced.asked, ...asked } } }] : [];
+  });
+  store.putUnits(records);
+}
+
+/** The sidecar's content, as a hash, if it's there. */
+function contentOf(path: string): string | undefined {
+  try {
+    return createHash("sha256").update(readFileSync(path)).digest("hex");
+  } catch {
+    return undefined;
+  }
+}
+
 async function reconcileUnit(
   ctx: ReconcileContext,
   unit: string,
   report: ReconcileReport,
-  tell: { refresh: (copy: Copy, fields: XmpFields) => void; trash: (copy: Copy) => void; restore: (copy: Copy) => void },
+  tell: { refresh: (copy: Copy, fields: XmpFields, sidecar: string | undefined) => void; trash: (copy: Copy) => void; restore: (copy: Copy) => void },
 ): Promise<void> {
   const { store, exiftool, dryRun } = ctx;
   const sidecarPath = `${unit}.xmp`;
@@ -405,6 +438,7 @@ async function reconcileUnit(
 
   // 3. Write the sidecar's changed fields, if the file is still as it was read.
   let stamp = sidecar?.stamp;
+  let written = false;
   if (fields) {
     const wanted: Wanted = { tags: merged.tags, title: merged.title };
     if (image && immichReadsImageTags(fields, image)) wanted.tagsList = true;
@@ -428,18 +462,40 @@ async function reconcileUnit(
       if (outcome.status === "written") {
         stamp = outcome.stamp;
         fields = (await readSidecar(exiftool, sidecarPath))?.fields ?? fields;
-        // 4. Tell Immich: every copy reads the changed sidecar again (F1).
-        for (const copy of copies) tell.refresh(copy, fields);
+        written = true;
       }
     }
   }
 
-  // 4. Tell Immich: copies that don't hold what they'd read from the sidecar read it again, and trash follows (F8).
+  // 4. Tell Immich: after a write, every copy reads the changed sidecar again (F1); otherwise, copies that don't hold
+  // what they'd read from it. Either way, only a copy not already asked to read this sidecar (`askable`). Trash follows
+  // (F8).
+  const content = fields ? contentOf(sidecarPath) : undefined;
+  const differs = new Set<string>();
+  const askable = (copy: Copy): boolean => {
+    // A copy asked to read this sidecar before that read it and still differs always will: Immich takes some values
+    // from elsewhere (such as the image file's own description). One not updated since is still waiting for its read:
+    // asking again would only queue another, and each read's events bring the unit back here. It's asked again a day
+    // on, in case the request was lost.
+    const last = previous?.synced.asked?.[copy.asset.id];
+    if (content === undefined || last?.sidecar !== content) return true;
+    if (copy.asset.updatedAt === last.updatedAt) return Date.now() - Date.parse(last.at) >= ASK_AGAIN_MS;
+    if (!last.differs) {
+      log.info("a copy updated since it was asked to read its sidecar still differs from it (Immich may show some values from elsewhere): it's asked again when the sidecar changes", {
+        unit,
+        account: copy.record.account,
+        asset: copy.asset.id,
+      });
+    }
+    differs.add(copy.asset.id);
+    return false;
+  };
   for (const copy of copies) {
     // A copy catching up is asked again if the sidecar changed since it was asked: what it will read is out of date.
     // One never asked (newly seen) is asked if it doesn't hold what the sidecar says.
     const asked = catchingUp.has(copy.asset.id) ? ctx.refreshing.get(copy.asset.id) : undefined;
-    if (fields && (asked ? !sameImmichView(asked.fields, fields) : !copyInStep(copy.asset, fields))) tell.refresh(copy, fields);
+    const wanted = written || (fields !== undefined && (asked ? !sameImmichView(asked.fields, fields) : !copyInStep(copy.asset, fields)));
+    if (fields && wanted && askable(copy)) tell.refresh(copy, fields, content);
     if (copy.asset.isOffline) continue;
     if (merged.trashed && !copy.asset.isTrashed) tell.trash(copy);
     if (!merged.trashed && copy.asset.isTrashed) tell.restore(copy);
@@ -456,6 +512,11 @@ async function reconcileUnit(
       copies: copies.map((copy) => copy.asset.id),
       seen: Object.fromEntries(copies.map((copy) => [copy.asset.id, copyValues(copy.asset)])),
     };
+    // What each copy was asked to read before; the requests made now are added once Immich takes them (`recordAsked`).
+    const asked = Object.entries(previous?.synced.asked ?? {}).flatMap(([id, entry]): [string, Asked][] =>
+      synced.copies!.includes(id) ? [[id, differs.has(id) ? { ...entry, differs: true } : entry]] : [],
+    );
+    if (asked.length > 0) synced.asked = Object.fromEntries(asked);
     store.putUnits([{ path: unit, ...(stamp ? { sidecar: stamp } : {}), synced, updated: new Date().toISOString() }]);
   }
 

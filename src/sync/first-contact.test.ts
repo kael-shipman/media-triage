@@ -172,4 +172,21 @@ describeImmich("the first run over an archive Immich already indexed", () => {
     await twice();
     expect((await fields()).rating).toBe(5);
   }, 120_000);
+
+  test("a copy that can't show what its sidecar says is asked to read it once, not on every pass or restart", async () => {
+    // The image embeds a blank ImageDescription, which Immich shows before the sidecar's description, so the copy never
+    // holds what the sidecar says. Asking it again queues another read, whose events bring the unit back: on the
+    // author's server, a few such photos filled Immich's queue with tens of thousands of reads.
+    const { twice, ctx, unit, read, fields } = await indexed("first-unshowable", { image: { "IFD0:ImageDescription": "   " } });
+    expect((await twice()).refreshed).toBe(0);
+    expect((await read()).exifInfo?.description).toBe("");
+    expect((await fields()).description).toBe("A day by the lake");
+    expect((await reconcile(ctx, [unit])).refreshed).toBe(0);
+    // A restart forgets the copies asked in memory; the unit's record doesn't.
+    expect((await reconcile({ ...ctx, refreshing: new Map<string, Refreshing>() }, [unit])).refreshed).toBe(0);
+    // A change to the sidecar is read, though.
+    const sidecar = (await readSidecar(exiftool, `${unit}.xmp`))!;
+    await writeSidecar(exiftool, sidecar, { rating: 5 });
+    expect((await reconcile({ ...ctx, refreshing: new Map<string, Refreshing>() }, [unit])).refreshed).toBe(1);
+  }, 120_000);
 });

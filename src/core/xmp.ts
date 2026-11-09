@@ -358,16 +358,16 @@ export function planWrite(fields: XmpFields, wanted: Wanted): Assignments {
   };
 
   if (wanted.rating !== undefined && wanted.rating !== (fields.rating ?? null)) set(TAGS.rating, wanted.rating);
-  if (wanted.title !== undefined && wanted.title !== (fields.title ?? null)) set(TAGS.title, wanted.title);
+  if (wanted.title !== undefined && !sameText(wanted.title, fields.title ?? null)) set(TAGS.title, wanted.title);
 
   if (wanted.description !== undefined) {
-    if (wanted.description !== (fields.description ?? null)) set(TAGS.description, wanted.description);
-    if (fields.immichDescription !== undefined && wanted.description !== fields.immichDescription) set(TAGS.immichDescription, wanted.description);
+    if (!sameText(wanted.description, fields.description ?? null)) set(TAGS.description, wanted.description);
+    if (fields.immichDescription !== undefined && !sameText(wanted.description, fields.immichDescription)) set(TAGS.immichDescription, wanted.description);
   }
 
   if (wanted.creator !== undefined) {
     const creator = wanted.creator === null ? [] : [wanted.creator];
-    if (!sameList(creator, fields.creator ?? [])) set(TAGS.creator, wanted.creator === null ? null : creator);
+    if (!sameList(creator.map(asWritten), (fields.creator ?? []).map(asWritten))) set(TAGS.creator, wanted.creator === null ? null : creator);
   }
 
   if (wanted.tags !== undefined) {
@@ -425,6 +425,17 @@ export function planWrite(fields: XmpFields, wanted: Wanted): Assignments {
   return plan;
 }
 
+/**
+ * A value as it reads back once written: exiftool writes the first value of each field without its leading space (a
+ * tag Darktable holds as " California", which sorts first, or a title typed with one). Values are compared that way,
+ * or the same file would be written again on every pass.
+ */
+const asWritten = (value: string) => value.trimStart();
+
+function sameText(a: string | null, b: string | null): boolean {
+  return a === null || b === null ? a === b : asWritten(a) === asWritten(b);
+}
+
 function sameList(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && a.every((item, index) => item === b[index]);
 }
@@ -432,7 +443,7 @@ function sameList(a: readonly string[], b: readonly string[]): boolean {
 /** Sets a list field when it isn't already the same set; an empty list removes the field. */
 function setList(plan: Assignments, tag: string, value: string[], current: string[] | undefined): void {
   const unique = [...new Set(value)];
-  if (!sameTags(unique, current ?? [])) plan[tag] = unique.length === 0 ? null : unique;
+  if (!sameTags(unique.map(asWritten), (current ?? []).map(asWritten))) plan[tag] = unique.length === 0 ? null : unique;
 }
 
 const near = (a: number, b: number | undefined) => b !== undefined && Math.abs(a - b) <= GPS_TOLERANCE;

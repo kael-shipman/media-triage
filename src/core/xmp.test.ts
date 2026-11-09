@@ -247,6 +247,20 @@ describe("planWrite", () => {
     expect(planWrite({ hierarchicalSubject: ["B", "A"], subject: ["A", "B"] }, { tags: ["A", "B"] })).toEqual({});
   });
 
+  test("values that differ only by a leading space, which exiftool doesn't write, are already written", () => {
+    // As on the author's server: Darktable holds " California" (typed with a space) beside "California". Sorted, it
+    // comes first, and exiftool writes the first value of a field without its leading space, so TagsList holds
+    // "California" twice. Planning it again would write the same file on every pass.
+    const fields: XmpFields = {
+      hierarchicalSubject: [" California", "California", "Places|California"],
+      subject: [" California", "California", "Places"],
+      tagsList: ["California", "California", "Places/California"],
+      title: "Lake day",
+    };
+    expect(planWrite({ ...fields, tagsList: [...fields.tagsList!, "Title/ Lake day"] }, { tags: [" California", "California", "Places/California"], title: " Lake day" })).toEqual({});
+    expect(planWrite(fields, { title: "Lake  day" })).toEqual({ [TAGS.title]: "Lake  day" });
+  });
+
   describe("dates: both tools show the same capture time, and the offset is kept where Darktable keeps it", () => {
     test("Darktable moved the time: both fields get it, with the zone it had", () => {
       const moved = { ...immichFields, date: "2020:06:15 11:00:00.000" };

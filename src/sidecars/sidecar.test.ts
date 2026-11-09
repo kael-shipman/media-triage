@@ -200,6 +200,17 @@ describe("writing", () => {
     expect(await writeSidecar(exiftool, after, wanted)).toEqual({ status: "unchanged" });
   });
 
+  test("a leading space exiftool drops when writing doesn't make every pass write again", async () => {
+    // exiftool writes the first value of each field without its leading space: a tag Darktable holds as " California"
+    // (sorted first) or a title typed with one. Read back, there's nothing more to write.
+    const path = copyOf("darktable");
+    const wanted = { tags: [" California", "California", "Places/Lake"], title: " Lake day" };
+    expect((await writeSidecar(exiftool, (await readSidecar(exiftool, path))!, wanted)).status).toBe("written");
+    const after = (await readSidecar(exiftool, path))!;
+    expect(after.fields.tagsList?.[0]).toBe("California");
+    expect(await writeSidecar(exiftool, after, wanted)).toEqual({ status: "unchanged" });
+  });
+
   test("removing values", async () => {
     const path = copyOf("immich");
     await writeSidecar(exiftool, (await readSidecar(exiftool, path))!, { tags: [], description: null, gps: null, rating: null });

@@ -8,12 +8,12 @@ you're about to build would change it, ask the author first.
 session stops partway. Each step ends with tests passing, the type check clean, a commit and a push; CI must stay
 green.
 
-**Last updated:** 2026-11-08 (`v0.1.2`: filing moves Darktable duplicates; the watcher sees `…_<digits>` names). **All 8 milestones are done** (the last,
+**Last updated:** 2026-11-09 (`v0.1.3`: the refresh loop, "The refresh loop" below). **All 8 milestones are done** (the last,
 filing, on 2026-11-05), and the first run over a real archive was checked and four ways it could lose data were fixed
 ("Checked before the first real run", below). `v0.1.0` was installed on the author's server and dry-run over their
 archive on 2026-11-07, which found two ways the first run would write wrong values, fixed in `v0.1.1` ("The first dry
 run", below). `v0.1.1`'s dry run there was good, and **it's been live on the author's server since 2026-11-07**.
-`v0.1.2` (2026-11-08, "After going live", below) reaches it by the daemon's own upgrade.
+`v0.1.2` (2026-11-08, "After going live", below) and `v0.1.3` (2026-11-09) reach it by the daemon's own upgrade.
 
 ## Working on it
 
@@ -45,7 +45,7 @@ run", below). `v0.1.1`'s dry run there was good, and **it's been live on the aut
 - **Immich's source**, for checking behavior: the fork's clone at `~/Desktop/tmp-repos/immich`, branch `twins`, based
   on v3.3.5. Look in `server/src`: `controllers/`, `dtos/`, `services/`, `repositories/`. Use Immich only through
   its API, never its database.
-- **Releases:** `v0.1.2` (2026-11-08, duplicates filed, the watcher's names), `v0.1.1` (2026-11-07, the fixes from the
+- **Releases:** `v0.1.3` (2026-11-09, the refresh loop), `v0.1.2` (2026-11-08, duplicates filed, the watcher's names), `v0.1.1` (2026-11-07, the fixes from the
   first dry run on the author's archive), `v0.1.0`
   (2026-11-07, everything through milestone 8 and the fixes of 2026-11-05), and the
   pre-releases `v0.1.0-rc.1` and `rc.2`, from milestone 1 only. Pushing a tag `vX.Y.Z` publishes a release
@@ -189,6 +189,27 @@ and the libraries matched. It found, by reading the planned writes against the f
   failed before).
 - The author's Immich fork now has the F1 patch (`IMMICH_FIND_NEW_SIDECARS`, `v3.3.6`); `reads_new_sidecars = true`
   once the server runs it.
+
+## The refresh loop (2026-11-09, `v0.1.3`)
+
+Live on the author's server, about 60 photos were reconciled every few seconds from about 20:00 on 2026-11-08, each
+time asking Immich to read the sidecar again. Immich's metadata queue reached 32,000 reads of those photos by morning,
+and new phone photos stayed gray behind them. The author stopped the service, the queue was emptied, and Immich's
+"Missing" jobs caught up the rest. Two causes, both fixed (DESIGN.md section 5), each with a test that failed first:
+- **A copy that can't show its sidecar's values was asked again on every pass.** Immich shows the image's own
+  `ImageDescription`, even blank, over the sidecar's description, and stores some characters differently, so such a
+  copy never holds what the sidecar says. Each read's own stream events brought the unit back, and once Immich's queue
+  was over an hour deep, every pending read was asked for again too. Now the unit's record keeps the sidecar each copy
+  was last asked to read (a hash, `SyncedValues.asked`): it isn't asked again for the same one, except a day on if it
+  wasn't updated since (a lost request). Test: `src/sync/first-contact.test.ts`, "a copy that can't show".
+- **A value starting with a space never got written.** exiftool writes the first value of each field without its
+  leading space, so a tag Darktable holds as `" California"` beside `"California"` (sorted first) never reached
+  `TagsList` as itself: the same file was written, and every copy refreshed, on every pass. Values are now compared as
+  exiftool writes them (`asWritten` in `src/core/xmp.ts`). Tests: `xmp.test.ts` and `sidecar.test.ts`.
+
+Not changed: an account whose session was revoked is warned about on every run ("account left out of sync"); Jess's
+was revoked when her phone app was set up, and the warning repeated every few seconds. Logging it once per change
+would be quieter.
 
 ## Next: running it for real
 

@@ -209,6 +209,21 @@ If the state is lost, merge as a union, which never drops a tag, and report it.
 - **Telling Immich:** when the sidecar is written, every copy is refreshed; otherwise only copies that don't hold what
   they'd read from the sidecar (`immichReads`), such as another account's copy after an edit in Immich. Refreshes,
   trashes and restores are batched per account.
+- **A copy is asked to read a sidecar once** (`askable`). The unit's record keeps, for each copy, a hash of the
+  sidecar it was last asked to read, with the copy's `updatedAt` then (`SyncedValues.asked`, recorded once Immich took
+  the request). While the sidecar is the same, the copy isn't asked again:
+  - **if it was updated since and still differs,** it always will: Immich takes some values from elsewhere, such as
+    the image file's own `ImageDescription`, even blank, over the sidecar's description, or a description holding a
+    character Immich stores differently. This is logged once per copy and sidecar;
+  - **if it wasn't updated since,** its read is still queued. It's asked again only a day on, in case the request was
+    lost (Immich's queue emptied, say).
+
+  Otherwise each read's own events bring the unit back, and it asks again: on the author's server (2026-11-09), about
+  60 photos put 32,000 reads in Immich's queue overnight, and new photos waited behind them.
+- **A value is compared as exiftool will write it.** exiftool writes the first value of each field without its
+  leading space: a tag Darktable holds as `" California"` beside `"California"` (sorted first), or a title typed with
+  one. Compared as they were, the write never took, and the same file was written, and every copy refreshed, on every
+  pass (10 of those 60 photos).
 - **A copy catching up isn't a side.** Until a copy asked to refresh has read the sidecar, what it says of the
   sidecar's values is an older sidecar's. Counted as a side, it would undo the change it was asked to read: the daemon
   looks at the unit again a moment after its own write (the watcher sees it), and a tag just removed, still on the
@@ -217,7 +232,7 @@ If the state is lost, merge as a union, which never drops a tag, and report it.
   now (an edit in Immich rewrites the sidecar), or once its `updatedAt` changed at least 2 seconds earlier (metadata
   extraction updates the asset; its tags are replaced in a parallel step). After an hour it counts again, with a
   warning. A copy catching up is asked again if the sidecar has changed since it was asked. This is kept in memory: a
-  restart forgets it.
+  restart forgets it (what it was asked to read isn't: see above).
 - **A copy the last sync didn't see isn't a side either,** once there's a base, until it holds what the sidecar says
   (and it's asked to refresh). It may have read an older sidecar: a tag it never had, such as the title tag written
   before this account's copy was learned, would read as one it removed (found by the daemon's smoke test,
@@ -789,3 +804,6 @@ with what changed, not with the size of the archive.
   counts links to files (section 3).
 - 2026-11-07: filing moves a photo's Darktable duplicates' sidecars with it (section 7; decided by the author), and the
   watcher no longer takes every sidecar named `…_<digits>.<ext>.xmp` for a duplicate's (section 3).
+- 2026-11-09: a copy is asked to read a sidecar once, and values are compared as exiftool writes them (section 5).
+  Live on the author's server, about 60 photos were reconciled every few seconds overnight, each asking Immich for
+  another read: 32,000 queued reads, and new phone photos stayed gray behind them. Fixed in `v0.1.3`.

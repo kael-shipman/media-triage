@@ -80,6 +80,20 @@ export interface SyncedValues extends Base {
   copies?: string[];
   /** What each of those copies said, by asset ID: the merge compares each copy with what it said itself. */
   seen?: Record<string, SideValues>;
+  /** What each copy was last asked to read, by asset ID: it isn't asked to read the same sidecar again. */
+  asked?: Record<string, Asked>;
+}
+
+/** A copy asked to read the sidecar (src/sync/reconcile.ts, `askable`). */
+export interface Asked {
+  /** The sidecar's content then, as a hash. */
+  sidecar: string;
+  /** The copy's `updatedAt` then. */
+  updatedAt: string;
+  /** When (ISO 8601). */
+  at: string;
+  /** Whether it was seen to differ from that sidecar since: logged once. */
+  differs?: true;
 }
 
 export interface UnitRecord {
