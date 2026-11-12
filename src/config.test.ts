@@ -15,7 +15,7 @@ describe("the example configuration", () => {
       { folder: "Alex Phone", creator: "Alex Example" },
       { folder: "Sam Phone", creator: "Sam Example" },
     ]);
-    expect(config.filing).toEqual({ photos: "Pictures", videos: "Videos/Clips" });
+    expect(config.filing).toEqual({ photos: "Pictures", videos: "Videos/Clips", at: "04:00" });
     expect(config.immich.url).toBe("http://127.0.0.1:2283");
     expect(config.immich.pathMap).toEqual([{ immich: "/mnt/media/", local: "/srv/media/" }]);
     expect(config.immich.accounts.map((account) => [account.name, account.admin])).toEqual([
@@ -66,6 +66,8 @@ describe("mistakes it catches", () => {
     ['[[sources]]\nfolder = "A"', "sources[0].creator is required"],
     ['[[sources]]\nfolder = "A"\ncreator = "C"\n[[sources]]\nfolder = "A"\ncreator = "D"', '"A" appears twice'],
     ['[filing]\nphotos = "../out"', "filing.photos must be a folder inside the archive"],
+    ['[filing]\nat = "4am"', 'filing.at must be a time of day written HH:MM, like "04:00", not "4am"'],
+    ['[filing]\nat = "24:00"', "filing.at must be a time of day"],
     ['[immich]\nurl = "ftp://x"', "immich.url must be an http or https URL"],
     ['[immich]\npath_map = [{ immich = "/a", local = "/b" }, { immich = "/a/", local = "/c" }]', 'immich.path_map: immich: "/a/" appears twice'],
     ['[[immich.accounts]]\nname = "Alex"\nemail = "a@b"', "immich.accounts[0].name must be lowercase"],
@@ -82,6 +84,11 @@ describe("mistakes it catches", () => {
     expect(() => parse(toml)).toThrow(ConfigError);
     expect(() => parse(toml)).toThrow(message);
   });
+});
+
+test("filing's time defaults to 04:00, and is written HH:MM", () => {
+  expect(parseConfig({}, null).filing.at).toBe("04:00");
+  expect(parseConfig({ filing: { at: "2:05" } }, null).filing.at).toBe("02:05");
 });
 
 test("reads_new_sidecars defaults to false", () => {

@@ -39,8 +39,9 @@ One daemon, running where the files and Immich are:
   get a new tag or a named face. That covers ratings, tags, titles, descriptions, creators, rejects and trash.
 - **Records what Immich keeps only in its database:** each account's favorites, archiving and albums, and the named
   faces, kept in the sidecar. Named faces also become `People|<name>` tags.
-- **Filing:** moves what's tagged `Promote` from the inbox into the archive, named like the export preset. It then
-  puts back the favorites, albums and face corrections on the new copies.
+- **Filing:** once a day, at a time you choose (04:00 by default), moves what's tagged `Promote` from the inbox into
+  the archive, named like the export preset. It then puts back the favorites, albums and face corrections on the new
+  copies.
 - **Cleanup:** deletes sidecars whose photo is gone.
 - **Account upkeep:** creates each account's Immich libraries. One account can be limited to folders dated on or
   after a given day, and the daemon checks that it sees exactly those. It also keeps people shared and named across

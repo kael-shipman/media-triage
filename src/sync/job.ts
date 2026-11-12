@@ -6,6 +6,7 @@
 import fastGlob from "fast-glob";
 import { join } from "node:path";
 import type { Config } from "../config.ts";
+import { filingWindow } from "../core/filing-window.ts";
 import { PROMOTE_TAG } from "../core/naming.ts";
 import { PathMap } from "../core/path-map.ts";
 import { fileBatch, finishPlanned } from "../filing/file.ts";
@@ -30,7 +31,7 @@ export const QUIET_MS = 2000;
 export const STREAM_INTERVAL_MS = 60_000;
 /** The most dirty units reconciled in one run. */
 export const UNITS_PER_RUN = 200;
-/** How often the filing job looks at the inbox units tagged Promote. */
+/** How often the filing job runs: putting back, and, while its window is open, the inbox units tagged Promote. */
 export const FILING_INTERVAL_MS = 60_000;
 
 export interface SyncOptions {
@@ -49,6 +50,8 @@ export class Sync {
   private filedBefore = false;
   /** The filing problems last logged, by unit, so each is logged when it first appears. */
   private filingProblems = new Map<string, string>();
+  /** Whether the filing window was open at the last run, so its opening and closing are logged once each. */
+  private windowOpen: boolean | undefined;
   /** What units being put back were last logged as waiting for. */
   private restoreWaits = new Map<string, string>();
   /** Copies catching up after a refresh (src/sync/reconcile.ts). */
@@ -157,10 +160,11 @@ export class Sync {
   }
 
   /**
-   * The filing job (DESIGN.md, section 7): finishes plans a run left unfinished, then reconciles the inbox units tagged
-   * Promote, which says which are ready, and files those; then puts back what Immich keeps per asset on units filed
-   * earlier, once their new copies are there. Looks again sooner when a unit is only waiting out the settle time.
-   * Problems, and what put-back units wait for, are logged when they first appear, not every run.
+   * The filing job (DESIGN.md, section 7): finishes plans a run left unfinished, and puts back what Immich keeps per
+   * asset on units filed earlier, once their new copies are there. Then, only while the filing window is open (or in a
+   * dry run, which moves nothing), reconciles the inbox units tagged Promote, which says which are ready, and files
+   * those, looking again sooner when a unit is only waiting out the settle time. Problems, and what put-back units
+   * wait for, are logged when they first appear, not every run.
    */
   async file(): Promise<RunResult | void> {
     const { ctx } = await this.context();
@@ -172,6 +176,18 @@ export class Sync {
     for (const [unit, why] of waiting) if (this.restoreWaits.get(unit) !== why) log.info("putting back after filing: waiting", { unit, for: why });
     this.restoreWaits = waiting;
     if (!this.config.paths.inbox || this.options.signal?.aborted) return;
+    const window = filingWindow(new Date(), this.config.filing.at);
+    if (window.open !== this.windowOpen && this.windowOpen !== undefined) {
+      log.info(window.open ? "the filing window is open: filing promoted units for the next hour" : "the filing window is closed", { at: this.config.filing.at });
+    }
+    this.windowOpen = window.open;
+    if (!window.open && !this.options.dryRun) {
+      for (const { unit, problem } of finished.problems) {
+        if (this.filingProblems.get(unit) !== problem) log.warn("not filed", { unit, problem });
+        this.filingProblems.set(unit, problem);
+      }
+      return;
+    }
     const sources = this.config.sources.map((source) => join(this.config.paths.inbox!, source.folder));
     const filings = new FilingStore(this.store.db);
     const candidates = this.store.unitsTagged(sources, PROMOTE_TAG).filter((unit) => filings.get(unit)?.status !== "planned");

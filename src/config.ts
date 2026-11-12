@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, normalize } from "node:path";
+import { parseTimeOfDay } from "./core/filing-window.ts";
 import type { PathMapping } from "./core/path-map.ts";
 import { parseDuration } from "./duration.ts";
 import { LEVELS, type Level } from "./log.ts";
@@ -57,7 +58,8 @@ export interface Config {
   file: string | null;
   paths: { inbox?: string; archive?: string; state: string };
   sources: Source[];
-  filing: { photos: string; videos: string };
+  /** `at`: when filing moves files each day, "HH:MM" in the server's local time (DESIGN.md, section 7). */
+  filing: { photos: string; videos: string; at: string };
   immich: {
     url?: string;
     pathMap: PathMapping[];
@@ -113,7 +115,10 @@ export function parseConfig(raw: unknown, file: string | null): Config {
   const filing = {
     photos: filingTable.relativePath("photos") ?? "Pictures",
     videos: filingTable.relativePath("videos") ?? "Videos/Clips",
+    at: filingTable.string("at") ?? "04:00",
   };
+  const at = parseTimeOfDay(filing.at) ?? filingTable.fail("at", `must be a time of day written HH:MM, like "04:00", not "${filing.at}"`);
+  filing.at = `${String(at.hour).padStart(2, "0")}:${String(at.minute).padStart(2, "0")}`;
   filingTable.done();
 
   const immichTable = root.table("immich");

@@ -8,7 +8,7 @@ you're about to build would change it, ask the author first.
 session stops partway. Each step ends with tests passing, the type check clean, a commit and a push; CI must stay
 green.
 
-**Last updated:** 2026-11-09 (`v0.1.3`: the refresh loop, "The refresh loop" below). **All 8 milestones are done** (the last,
+**Last updated:** 2026-11-11 (`v0.2.0`: filing only in a daily window, "Filing at night" below). **All 8 milestones are done** (the last,
 filing, on 2026-11-05), and the first run over a real archive was checked and four ways it could lose data were fixed
 ("Checked before the first real run", below). `v0.1.0` was installed on the author's server and dry-run over their
 archive on 2026-11-07, which found two ways the first run would write wrong values, fixed in `v0.1.1` ("The first dry
@@ -45,7 +45,7 @@ run", below). `v0.1.1`'s dry run there was good, and **it's been live on the aut
 - **Immich's source**, for checking behavior: the fork's clone at `~/Desktop/tmp-repos/immich`, branch `twins`, based
   on v3.3.5. Look in `server/src`: `controllers/`, `dtos/`, `services/`, `repositories/`. Use Immich only through
   its API, never its database.
-- **Releases:** `v0.1.3` (2026-11-09, the refresh loop), `v0.1.2` (2026-11-08, duplicates filed, the watcher's names), `v0.1.1` (2026-11-07, the fixes from the
+- **Releases:** `v0.2.0` (2026-11-11, filing at a set time), `v0.1.3` (2026-11-09, the refresh loop), `v0.1.2` (2026-11-08, duplicates filed, the watcher's names), `v0.1.1` (2026-11-07, the fixes from the
   first dry run on the author's archive), `v0.1.0`
   (2026-11-07, everything through milestone 8 and the fixes of 2026-11-05), and the
   pre-releases `v0.1.0-rc.1` and `rc.2`, from milestone 1 only. Pushing a tag `vX.Y.Z` publishes a release
@@ -214,6 +214,17 @@ time and GPS), and none of the looping ones. The service is started again by the
 Not changed: an account whose session was revoked is warned about on every run ("account left out of sync"); Jess's
 was revoked when her phone app was set up, and the warning repeated every few seconds. Logging it once per change
 would be quieter.
+
+## Filing at night (2026-11-11, `v0.2.0`)
+
+The author found filing heavy and disruptive: every move has Immich scan, read each new copy in every account and drop
+the old ones, at whatever hour a batch was promoted. Now filing moves units only in a daily window, the hour from
+`filing.at` (`"HH:MM"`, the server's local time, default `"04:00"`; DESIGN.md section 7, `src/core/filing-window.ts`).
+The filing job still runs every minute for putting back and finishing a plan cut short, which aren't limited to the
+window, nor is a dry run. A daemon that isn't running for the whole window files nothing until the next day's: no
+catch-up, so a restart in the afternoon doesn't move anything. The smoke test sets `at` to the time it starts.
+
+On the author's server: `at = "02:00"` (its time zone is America/Chicago).
 
 ## Next: running it for real
 

@@ -55,7 +55,9 @@ export async function runDaemon(config: Config, options: DaemonOptions): Promise
     scheduler.trigger("sync");
   });
   scheduler.add("sync", { intervalMs: STREAM_INTERVAL_MS, firstInMs: 0 }, () => sync.run());
-  // Filing (DESIGN.md, section 7): every minute, or sooner when a unit is only waiting out the settle time.
+  // Filing (DESIGN.md, section 7): every minute, for putting back after a move. It moves promoted units only in the hour
+  // from filing.at, then sooner when a unit is only waiting out the settle time.
+  log.info("promoted units are filed daily", { at: config.filing.at, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone });
   scheduler.add("filing", { intervalMs: FILING_INTERVAL_MS, firstInMs: 0 }, () => sync.file());
 
   if (config.upgrade.enabled && !IS_COMPILED) {

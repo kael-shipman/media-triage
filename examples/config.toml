@@ -28,6 +28,10 @@ creator = "Sam Example"
 # <photos>/YYYY.MM.DD - <Title>/YYYY.MM.DD-HH.MM.SS - <Creator>.<ext>
 photos = "Pictures"
 videos = "Videos/Clips"
+# When filing moves promoted photos, each day: in the hour from this time ("HH:MM", the server's local time). Moving
+# is heavy for Immich (it scans, and reads every new copy in every account), so pick a quiet time. Putting back what
+# Immich keeps per asset, after a move, isn't limited to it.
+at = "04:00"
 
 [immich]
 url = "http://127.0.0.1:2283"

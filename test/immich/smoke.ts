@@ -77,6 +77,10 @@ name = "two"
 email = "${two.email}"
 
 ${[...libraries("one"), ...libraries("two")].join("\n")}
+# Filing's window opens now, and lasts the hour the test takes at most.
+[filing]
+at = "${new Date().toTimeString().slice(0, 5)}"
+
 [timing]
 settle = "5s"
 

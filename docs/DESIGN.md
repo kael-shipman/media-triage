@@ -51,6 +51,7 @@ with `--config` or `MEDIA_TRIAGE_CONFIG`. [examples/config.toml](../examples/con
 | `[immich]` | The server's URL, and a path map from Immich's paths (inside its container) to the daemon's, both ways (`src/core/path-map.ts`; the longest matching folder wins) |
 | `[[immich.accounts]]` | Each account: a name used in logs and for its session file, and whether it's the admin |
 | `[[immich.libraries]]` | Each account's libraries: folders, extra exclusions, and an optional "dated on or after" limit (section 8) |
+| `[filing]` | Where filed photos and videos go in the archive, and when filing moves them each day (`at`, 04:00, section 7) |
 | `[timing]` | Settle time before filing (5 min), orphan grace period (1 h), full pass (24 h) |
 | `[upgrade]` | Automatic upgrades (section 11) |
 
@@ -508,10 +509,21 @@ to put back, and remove the named faces' tags and regions. So while a unit is be
 per-account state (F9) and its named faces' tags and regions (F10) as they are, and goes back to normal once filing is
 done with it.
 
+**When it runs** (decided by the author, 2026-11-11): moving is heavy for Immich. Every move makes it scan, read
+each new copy in every account, and drop the old ones, while the server is in use. So filing moves units only in the
+**filing window**: the hour from `filing.at` (`"HH:MM"`, 04:00 by default), in the server's local time
+(`src/core/filing-window.ts`). A time skipped by a clock change opens it at the first time after. Outside it, a unit
+tagged `Promote` waits, and still gets `Promote/Needs a title` if it has no title. Not limited to the window:
+- putting back after a move, since it only waits for Immich;
+- finishing a plan cut short, since a unit half moved is worse than a move at the wrong time;
+- a dry run, which moves nothing, so it shows what it would file at any time.
+
+A daemon that isn't running for the whole window files nothing until the next day's.
+
 **How it runs** (`src/filing/`): a unit becomes ready only once it has been left alone for the settle time, and
-nothing else happens then to wake the daemon. So filing is a job of its own, every minute (sooner when a unit is only
-waiting out the settle time): it reconciles the inbox units tagged `Promote`, then files those that are ready
-(`fileBatch`):
+nothing else happens then to wake the daemon. So filing is a job of its own, every minute: it finishes plans and puts
+back, and while the window is open (sooner when a unit is only waiting out the settle time) it reconciles the inbox
+units tagged `Promote`, then files those that are ready (`fileBatch`):
 - **The batch is planned, and the plans recorded** (the `filings` table), before anything moves.
 - **Each unit, in turn:** `Promote` (and `Promote/Needs a title`) out of its sidecar, written from the sidecar as it
   was when the unit was found ready, so a change since stops the move and the unit is looked at afresh; then every
@@ -807,3 +819,6 @@ with what changed, not with the size of the archive.
 - 2026-11-09: a copy is asked to read a sidecar once, and values are compared as exiftool writes them (section 5).
   Live on the author's server, about 60 photos were reconciled every few seconds overnight, each asking Immich for
   another read: 32,000 queued reads, and new phone photos stayed gray behind them. Fixed in `v0.1.3`.
+- 2026-11-11: filing moves units only in a daily window, the hour from `filing.at` (04:00 by default), as the author
+  asked (section 7): moving is heavy for Immich, and was disruptive at any hour. Putting back and finishing a plan
+  cut short aren't limited to it.
