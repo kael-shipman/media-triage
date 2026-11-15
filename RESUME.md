@@ -8,8 +8,8 @@ you're about to build would change it, ask the author first.
 session stops partway. Each step ends with tests passing, the type check clean, a commit and a push; CI must stay
 green.
 
-**Last updated:** 2026-11-14 (the `Inbox` tag, "The Inbox tag" below; not released yet). `v0.2.0` (2026-11-11):
-filing only in a daily window, "Filing at night" below. **All 8 milestones are done** (the last,
+**Last updated:** 2026-11-14 (`v0.3.0`: the `Inbox` tag, "The Inbox tag" below). `v0.2.0` (2026-11-11): filing
+only in a daily window, "Filing at night" below. **All 8 milestones are done** (the last,
 filing, on 2026-11-05), and the first run over a real archive was checked and four ways it could lose data were fixed
 ("Checked before the first real run", below). `v0.1.0` was installed on the author's server and dry-run over their
 archive on 2026-11-07, which found two ways the first run would write wrong values, fixed in `v0.1.1` ("The first dry
@@ -46,7 +46,7 @@ run", below). `v0.1.1`'s dry run there was good, and **it's been live on the aut
 - **Immich's source**, for checking behavior: the fork's clone at `~/Desktop/tmp-repos/immich`, branch `twins`, based
   on v3.3.5. Look in `server/src`: `controllers/`, `dtos/`, `services/`, `repositories/`. Use Immich only through
   its API, never its database.
-- **Releases:** `v0.2.0` (2026-11-11, filing at a set time), `v0.1.3` (2026-11-09, the refresh loop), `v0.1.2` (2026-11-08, duplicates filed, the watcher's names), `v0.1.1` (2026-11-07, the fixes from the
+- **Releases:** `v0.3.0` (2026-11-14, the `Inbox` tag), `v0.2.0` (2026-11-11, filing at a set time), `v0.1.3` (2026-11-09, the refresh loop), `v0.1.2` (2026-11-08, duplicates filed, the watcher's names), `v0.1.1` (2026-11-07, the fixes from the
   first dry run on the author's archive), `v0.1.0`
   (2026-11-07, everything through milestone 8 and the fixes of 2026-11-05), and the
   pre-releases `v0.1.0-rc.1` and `rc.2`, from milestone 1 only. Pushing a tag `vX.Y.Z` publishes a release
@@ -227,7 +227,7 @@ catch-up, so a restart in the afternoon doesn't move anything. The smoke test se
 
 On the author's server: `at = "02:00"` (its time zone is America/Chicago).
 
-## The Inbox tag (2026-11-14, unreleased)
+## The Inbox tag (2026-11-14, `v0.3.0`)
 
 The author asked for it: Immich's timeline is by date, so filing a photo didn't change what they saw, and what was
 still to triage was hard to find. Now every unit in an inbox source is tagged `Inbox`, and nothing else is (DESIGN.md
