@@ -7,7 +7,7 @@
 //   IMG_1, IMG_2: "Lake day", same capture time; Promote added on disk, as Darktable would (a name collision: _01).
 //   IMG_3: no title; Promote added in Immich (account one): it gets Promote/Needs a title and stays, until account
 //          two adds a Title/ tag in Immich, and then it's filed.
-//   IMG_4: not promoted: stays.
+//   IMG_4: not promoted: stays, tagged Inbox (the filed ones lose it).
 // Before Promote: one favorites IMG_1 and archives IMG_2; two puts IMG_1 and IMG_2 in an album. After filing, the new
 // copies must have them back; the old copies must be offline. Then the daemon is restarted: nothing more is filed.
 // The daemon's logs and state are left in a temporary folder, printed at the end.
@@ -187,11 +187,11 @@ const names = filed.flatMap((path) => [basename(path), `${basename(path)}.xmp`])
 check("the folder holds exactly the two photos and their sidecars", readdirSync(lake).sort().join("|") === names.join("|"), readdirSync(lake));
 for (const path of filed) {
   const fields = await sidecar(path);
-  check(`${basename(path)}: no Promote, title kept`, !promoted(fields) && fields?.title === "Lake day", fields?.hierarchicalSubject);
+  check(`${basename(path)}: no Promote or Inbox, title kept`, !promoted(fields) && !fields?.hierarchicalSubject?.includes("Inbox") && fields?.title === "Lake day", fields?.hierarchicalSubject);
 }
 await waitFor("IMG_3 marked Promote/Needs a title", async () => ((await sidecar(unit(3)))?.hierarchicalSubject?.includes("Promote|Needs a title") ? true : undefined), 120_000);
 check("IMG_3 stays, with Promote/Needs a title", existsSync(unit(3)));
-check("IMG_4 untouched", existsSync(unit(4)) && !promoted(await sidecar(unit(4))));
+check("IMG_4 untouched, tagged Inbox", existsSync(unit(4)) && !promoted(await sidecar(unit(4))) && (await sidecar(unit(4)))?.hierarchicalSubject?.includes("Inbox") === true);
 
 // Put back, on the new copies. Which filed file is which unit isn't fixed: find each new copy by the old one's state.
 await waitFor("put back both", async () => ((log.match(/put back unit=/g) ?? []).length >= 2 ? true : undefined), 600_000);
@@ -223,7 +223,7 @@ await api("PUT", `/tags/${title!.id}/assets`, { token: tokens.two, body: { ids: 
 const town = join(pictures, "2019.05.05 - Old town", "2019.05.05-09.08.07 - Alex Example.jpg");
 await waitFor("IMG_3 filed", async () => (existsSync(town) && existsSync(`${town}.xmp`) ? true : undefined), 300_000);
 const townFields = await sidecar(town);
-check("IMG_3 filed with its title, Promote and Needs a title gone", townFields?.title === "Old town" && !promoted(townFields) && !existsSync(unit(3)), townFields?.hierarchicalSubject);
+check("IMG_3 filed with its title, Promote, Needs a title and Inbox gone", townFields?.title === "Old town" && !promoted(townFields) && !townFields?.hierarchicalSubject?.includes("Inbox") && !existsSync(unit(3)), townFields?.hierarchicalSubject);
 await waitFor("put back IMG_3", async () => ((log.match(/put back unit=/g) ?? []).length >= 3 ? true : undefined), 600_000);
 
 check("daemon stopped cleanly", (await stop(daemon)) === 0);

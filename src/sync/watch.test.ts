@@ -134,6 +134,25 @@ test("the full pass returns units without a record, or whose sidecar changed", a
   state.close();
 });
 
+test("the full pass returns units whose record is wrong about Inbox: one in the inbox without it, one outside with it", async () => {
+  const state = State.open(join(dir, "state"));
+  const store = new SyncStore(state.db);
+  const inbox = join(dir, "media", "Inbox", "Pixel");
+  const archive = join(dir, "media", "Pictures");
+  for (const path of [join(inbox, "new.jpg"), join(inbox, "tagged.jpg"), join(archive, "filed.jpg"), join(archive, "tagged.jpg")]) touch(path);
+  const synced = { rating: null, title: null, description: null, creator: null, tags: [], date: null, gps: null, trashed: false };
+  const updated = "2026-11-14T00:00:00.000Z";
+  store.putUnits([
+    { path: join(inbox, "new.jpg"), synced, updated },
+    { path: join(inbox, "tagged.jpg"), synced: { ...synced, tags: ["Inbox"] }, updated },
+    { path: join(archive, "filed.jpg"), synced, updated },
+    { path: join(archive, "tagged.jpg"), synced: { ...synced, tags: ["Inbox"] }, updated },
+  ]);
+  const pass = await fullPass(store, [join(dir, "media")], (path) => path.startsWith(`${inbox}/`));
+  expect(pass.changed).toEqual([join(inbox, "new.jpg"), join(archive, "tagged.jpg")]);
+  state.close();
+});
+
 test("the full pass counts a link to a file as a file, as Immich does, but doesn't enter a linked folder", async () => {
   const state = State.open(join(dir, "state"));
   const store = new SyncStore(state.db);

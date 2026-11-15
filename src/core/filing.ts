@@ -1,9 +1,9 @@
 // When an inbox unit is filed (DESIGN.md, section 7): it's tagged `Promote` and has a title, after the merge; no copy
 // is in the trash and it isn't rejected; and it has settled: every copy agrees with the sidecar, and nothing about the
 // unit changed for the settle time. Without a title, it gets `Promote/Needs a title` instead, so the problem shows in
-// both tools.
+// both tools. Every inbox unit is tagged `Inbox`, until it's filed.
 
-import { NEEDS_TITLE_TAG, PROMOTE_TAG } from "./naming.ts";
+import { INBOX_TAG, NEEDS_TITLE_TAG, PROMOTE_TAG } from "./naming.ts";
 
 /**
  * An inbox unit's tags with `Promote/Needs a title` where it's tagged `Promote` but has no title, and without it
@@ -12,6 +12,15 @@ import { NEEDS_TITLE_TAG, PROMOTE_TAG } from "./naming.ts";
 export function withNeedsTitle(tags: readonly string[], title: string | null): string[] {
   const others = tags.filter((tag) => tag !== NEEDS_TITLE_TAG);
   return (others.includes(PROMOTE_TAG) && title === null ? [...others, NEEDS_TITLE_TAG] : others).sort();
+}
+
+/**
+ * A unit's tags with `Inbox` where it's in an inbox source, and without it everywhere else: the daemon's own tag, so
+ * what's still to triage can be found in both tools. Filing takes it off before the move.
+ */
+export function withInbox(tags: readonly string[], inbox: boolean): string[] {
+  const others = tags.filter((tag) => tag !== INBOX_TAG);
+  return (inbox ? [...others, INBOX_TAG] : others).sort();
 }
 
 /** A copy, as readiness needs it. */

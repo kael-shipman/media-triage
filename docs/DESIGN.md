@@ -67,7 +67,7 @@ video. Units in the archive count as much as units in the inbox (section 1).
 
 1. **Files:** inotify on the covered folders (section 1), with a watch per folder. It sees files arriving from the
    phones, Darktable's sidecars, and Immich's sidecar writes. A full pass over the same folders at start, and then
-   daily, catches anything missed (`src/sync/`).
+   daily, catches anything missed (`src/sync/`). It also returns a unit whose record is wrong about `Inbox` (section 7).
    - A unit is a media file Immich indexes and its `<file>.<ext>.xmp`, the one name Darktable reads. Other sidecar
      names (`<stem>.xmp`, a Darktable duplicate's `<stem>_01.<ext>.xmp`), hidden and temporary files, and Syncthing's
      conflict copies aren't synced. A sidecar named like a duplicate's is one only if no media file has its name and
@@ -218,6 +218,12 @@ If the state is lost, merge as a union, which never drops a tag, and report it.
     character Immich stores differently. This is logged once per copy and sidecar;
   - **if it wasn't updated since,** its read is still queued. It's asked again only a day on, in case the request was
     lost (Immich's queue emptied, say).
+
+  **Except when the daemon has just written it** back to what the copy was last asked to read. Something else wrote
+  the sidecar meanwhile, and the copy may have read that. The case found (2026-11-14): `Inbox` taken off in Immich.
+  Immich writes `TagsList` without it, the reconcile puts it back (it's the daemon's own tag), and the sidecar is
+  again byte for byte what both copies were asked to read, so the copy that lost the tag was never asked again. This
+  can't loop: Immich writes a sidecar only for an edit, never for a read.
 
   Otherwise each read's own events bring the unit back, and it asks again: on the author's server (2026-11-09), about
   60 photos put 32,000 reads in Immich's queue overnight, and new photos waited behind them.
@@ -433,6 +439,14 @@ sidecar when it starts.
 **Without a title,** the unit stays put and gets `Promote/Needs a title`, which is cleared once it's filed, or once
 `Promote` is gone.
 
+**`Inbox`** (asked for by the author, 2026-11-14): every unit in an inbox source is tagged `Inbox`, and nothing else
+is, so what's still to triage can be found in either tool (Immich's timeline is by date, so filing doesn't move a
+photo in it). Like `Promote/Needs a title`, it's the daemon's own tag (`withInbox`, `src/core/filing.ts`): the
+reconcile adds it to an inbox unit that lacks it, taken off by hand or not, and removes it from any other unit. Filing
+takes it out of the sidecar with `Promote`, so the new copies arrive without it. The full pass also returns a unit
+whose record has `Inbox` where it shouldn't, or lacks it where it should (section 3), so a unit already recorded gets
+it without waiting for an edit.
+
 **How readiness is judged** (`src/core/filing.ts`, `readiness`; the reconcile reports it): "rejected" is Darktable's
 reject (`xmp:Rating` -1); a copy agrees with the sidecar when it holds what it would read from it and isn't catching
 up (section 5); the unit last changed at the latest of the sidecar's mtime and the copies' `updatedAt`. A unit with a
@@ -461,7 +475,7 @@ copy in an account whose session isn't open isn't filed: that copy's state can't
 - **A Live Photo's video** (Immich's `livePhotoVideoId`, or failing that the same base name) goes with its photo, into
   `Pictures`, under the photo's new base name.
 - **`Promote` is removed** from the sidecar, and from the duplicates', before the move, so the new asset arrives
-  without it. The title stays.
+  without it, and `Inbox` with it. The title stays.
 - **Never overwrite, and never delete the source before the destination exists:** use `link()` then `unlink()`.
   Refuse to move between filesystems.
 - **Plan a whole batch** before moving anything, so an interrupted run can be finished or undone on the next one.
@@ -525,8 +539,8 @@ nothing else happens then to wake the daemon. So filing is a job of its own, eve
 back, and while the window is open (sooner when a unit is only waiting out the settle time) it reconciles the inbox
 units tagged `Promote`, then files those that are ready (`fileBatch`):
 - **The batch is planned, and the plans recorded** (the `filings` table), before anything moves.
-- **Each unit, in turn:** `Promote` (and `Promote/Needs a title`) out of its sidecar, written from the sidecar as it
-  was when the unit was found ready, so a change since stops the move and the unit is looked at afresh; then every
+- **Each unit, in turn:** `Promote` (and `Promote/Needs a title`, and `Inbox`) out of its sidecar, written from the
+  sidecar as it was when the unit was found ready, so a change since stops the move and the unit is looked at afresh; then every
   file linked at its new name, each checked to be this very file if the name exists; then the old names removed; then
   the unit's sync record moved to the new path, so the next merge has its base and F10 still knows what it made. Then
   the unit is being put back, and held (above).
@@ -822,3 +836,7 @@ with what changed, not with the size of the archive.
 - 2026-11-11: filing moves units only in a daily window, the hour from `filing.at` (04:00 by default), as the author
   asked (section 7): moving is heavy for Immich, and was disruptive at any hour. Putting back and finishing a plan
   cut short aren't limited to it.
+- 2026-11-14: every inbox unit is tagged `Inbox` until it's filed (section 7), as the author asked: Immich's timeline is
+  by date, so filing didn't show what was left to triage. Found building it: a copy whose edit the merge undid (the
+  daemon's own tag taken off) was never asked to read the sidecar again, since the daemon's write restored the bytes
+  it was last asked to read (section 5).

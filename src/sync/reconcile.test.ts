@@ -315,6 +315,29 @@ describeImmich("reconciling a unit with two accounts' copies", () => {
     expect((await readSidecar(exiftool, `${unit}.xmp`))!.fields.hierarchicalSubject).toContain("Promote|Needs a title");
   }, 180_000);
 
+  test("an inbox unit is tagged Inbox in both tools, and taken off in Immich, it comes back", async () => {
+    const { unit, ctx, copy, settled, token } = await twoAccounts("inbox-tag", { inbox: true });
+    const tagsOf = (asset: Asset) => (asset.tags ?? []).map((tag) => tag.value).sort();
+    await reconcile(ctx, [unit]);
+    const fields = (await readSidecar(exiftool, `${unit}.xmp`))!.fields;
+    expect(fields.hierarchicalSubject).toContain("Inbox");
+    expect(fields.subject).toContain("Inbox");
+    await settled("Inbox on both copies", (a, b) => tagsOf(a).includes("Inbox") && tagsOf(b).includes("Inbox"));
+
+    // Taken off in account one: Immich writes the sidecar's TagsList without it. The reconcile writes it back, which
+    // makes the sidecar what both copies were last asked to read, and still asks them to read it again.
+    const oneToken = await token("one");
+    const [inbox] = await api<{ id: string }[]>("PUT", "/tags", { token: oneToken, body: { tags: ["Inbox"] } });
+    await api("DELETE", `/tags/${inbox!.id}/assets`, { token: oneToken, body: { ids: [copy("one").id] } });
+    await waitFor("Immich's sidecar without Inbox", async () => ((await readSidecar(exiftool, `${unit}.xmp`))!.fields.tagsList?.includes("Inbox") === false ? true : undefined));
+    await waitFor("Inbox back on both copies and in the sidecar", async () => {
+      await reconcile(ctx, [unit]);
+      const [a, b] = [await getAsset(ctx.accounts.get("one")!.client, copy("one").id), await getAsset(ctx.accounts.get("two")!.client, copy("two").id)];
+      const sidecar = (await readSidecar(exiftool, `${unit}.xmp`))!.fields;
+      return a && b && tagsOf(a).includes("Inbox") && tagsOf(b).includes("Inbox") && sidecar.hierarchicalSubject?.includes("Inbox") ? true : undefined;
+    }, 60_000);
+  }, 180_000);
+
   test("filing moves a ready unit into Pictures, Immich finds it there, and its state is held, then put back", async () => {
     const { unit, folder, accounts, store, map, ctx, copy, settled, token } = await twoAccounts("filing", { inbox: true, admin: true });
     const tagsOf = (asset: Asset) => (asset.tags ?? []).map((tag) => tag.value).sort();
@@ -348,7 +371,7 @@ describeImmich("reconciling a unit with two accounts' copies", () => {
     const sidecar = (await readSidecar(exiftool, `${unit}.xmp`))!;
     await writeSidecar(exiftool, sidecar, { tags: [...darktableReads(sidecar.fields).tags, "Promote"] });
     await reconcile(ctx, [unit]);
-    await settled("Promote on both copies", (a, b) => tagsOf(a).includes("Promote") && tagsOf(b).includes("Promote"));
+    await settled("Promote and Inbox on both copies", (a, b) => [a, b].every((asset) => tagsOf(asset).includes("Promote") && tagsOf(asset).includes("Inbox")));
     await Bun.sleep(1100);
     const { ready } = await reconcile(ctx, [unit]);
     expect(ready).toHaveLength(1);
@@ -375,10 +398,13 @@ describeImmich("reconciling a unit with two accounts' copies", () => {
       return asset?.exifInfo?.rating === 3 ? true : undefined;
     });
     expect(tagsOf((await getAsset(ctx.accounts.get("one")!.client, newOne.id))!)).not.toContain("Promote");
+    expect(tagsOf((await getAsset(ctx.accounts.get("one")!.client, newOne.id))!)).not.toContain("Inbox");
 
-    // Held: the new copies aren't favorites yet, but the sidecar keeps what filing will put back.
+    // Held: the new copies aren't favorites yet, but the sidecar keeps what filing will put back. Out of the inbox, it
+    // isn't tagged Inbox again.
     await sync();
     await reconcile(ctx, [destination]);
+    expect((await readSidecar(exiftool, `${destination}.xmp`))!.fields.hierarchicalSubject).not.toContain("Inbox");
     expect((await readSidecar(exiftool, `${destination}.xmp`))!.fields.accounts).toEqual(before);
 
     // Put back: each account's state on its new copy, and the face added by hand. Then the hold is released.

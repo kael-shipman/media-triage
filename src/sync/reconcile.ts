@@ -16,7 +16,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Config } from "../config.ts";
 import { type FacesOutcome, type NamedFace, applyFaces } from "../core/faces.ts";
-import { readiness, withNeedsTitle } from "../core/filing.ts";
+import { readiness, withInbox, withNeedsTitle } from "../core/filing.ts";
 import { type Base, type Side, type SideValues, mergeUnit, normalizeDescription, normalizeRating } from "../core/merge.ts";
 import { isDarktableInternalInImmich, sameTags } from "../core/tags.ts";
 import { withTitle } from "../core/titles.ts";
@@ -216,7 +216,7 @@ function isCatchingUp(refreshing: Map<string, Refreshing>, copy: Copy, fields: X
 }
 
 /** The inbox source a unit is in, if it's in one. */
-function sourceOf(config: Config, unit: string): { creator: string } | undefined {
+export function sourceOf(config: Config, unit: string): { creator: string } | undefined {
   if (!config.paths.inbox) return undefined;
   return config.sources.find((source) => unit.startsWith(`${join(config.paths.inbox!, source.folder)}/`));
 }
@@ -433,8 +433,9 @@ async function reconcileUnit(
     });
     merged.tags = faces.tags;
   }
-  // Section 7: an inbox unit tagged Promote without a title says so, in both tools.
-  if (source) merged.tags = withNeedsTitle(merged.tags, merged.title);
+  // Section 7: an inbox unit is tagged Inbox until it's filed, and one tagged Promote without a title says so, in both
+  // tools.
+  merged.tags = withInbox(source ? withNeedsTitle(merged.tags, merged.title) : merged.tags, source !== undefined);
 
   // 3. Write the sidecar's changed fields, if the file is still as it was read.
   let stamp = sidecar?.stamp;
@@ -479,6 +480,10 @@ async function reconcileUnit(
     // on, in case the request was lost.
     const last = previous?.synced.asked?.[copy.asset.id];
     if (content === undefined || last?.sidecar !== content) return true;
+    // Written just now, back to what the copy was last asked to read: something else wrote it meanwhile, such as Immich
+    // after an edit the merge didn't keep (one of the daemon's own tags, `Inbox`, taken off), and the copy may have read
+    // that. Immich writes a sidecar only for an edit, never for a read, so this can't loop.
+    if (written) return true;
     if (copy.asset.updatedAt === last.updatedAt) return Date.now() - Date.parse(last.at) >= ASK_AGAIN_MS;
     if (!last.differs) {
       log.info("a copy updated since it was asked to read its sidecar still differs from it (Immich may show some values from elsewhere): it's asked again when the sidecar changes", {

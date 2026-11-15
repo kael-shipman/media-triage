@@ -1,12 +1,14 @@
 // The full pass (DESIGN.md, sections 3 and 13), at start and then daily: it finds every media file in the covered
 // folders, stats each one's sidecar, and returns the units whose sidecar changed since the state's record, or that
-// have no record yet, or whose media file was gone and is back. It reads no sidecar: the reconcile does, for the units
+// have no record yet, or whose media file was gone and is back, or whose record has `Inbox` where it shouldn't, or
+// lacks it where it should (so units already recorded get the tag, and lose it if moved by hand). It reads no sidecar: the reconcile does, for the units
 // returned. It also returns the sidecars that belong to no media file (F11), and Syncthing's conflict copies of
 // sidecars, for `handleOrphans`.
 
 import fastGlob from "fast-glob";
 import { statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
+import { INBOX_TAG } from "../core/naming.ts";
 import { isConflictCopy, isSidecar, sidecarOwner } from "../core/orphans.ts";
 import { sameStamp, stampOf } from "../sidecars/sidecar.ts";
 import { unitOf } from "./covered.ts";
@@ -23,7 +25,8 @@ export interface FullPass {
   conflicts: string[];
 }
 
-export async function fullPass(store: SyncStore, folders: readonly string[]): Promise<FullPass> {
+/** `inbox` says whether a media file is in an inbox source. */
+export async function fullPass(store: SyncStore, folders: readonly string[], inbox: (path: string) => boolean = () => false): Promise<FullPass> {
   const result: FullPass = { media: 0, changed: [], orphans: [], conflicts: [] };
   for (const folder of folders) {
     // Hidden files and folders are left out, as Immich's libraries leave them out. A link to a file counts as a file,
@@ -51,7 +54,8 @@ export async function fullPass(store: SyncStore, folders: readonly string[]): Pr
       const record = store.unit(path);
       const sidecar = stampOf(`${path}.xmp`);
       const same = record !== undefined && record.gone === undefined && (record.sidecar === undefined ? sidecar === undefined : sameStamp(record.sidecar, sidecar));
-      if (!same) result.changed.push(path);
+      const tagged = record !== undefined && record.synced.tags.includes(INBOX_TAG) === inbox(path);
+      if (!same || !tagged) result.changed.push(path);
     }
   }
   return result;

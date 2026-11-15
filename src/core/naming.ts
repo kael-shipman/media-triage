@@ -7,6 +7,8 @@ import { extname } from "node:path";
 
 export const PROMOTE_TAG = "Promote";
 export const NEEDS_TITLE_TAG = "Promote/Needs a title";
+/** On every unit in an inbox source, and nothing else: what's left to triage, since promoting doesn't move a photo in the timeline. */
+export const INBOX_TAG = "Inbox";
 /** Darktable's fallback for $(CREATOR-unknown creator). */
 export const UNKNOWN_CREATOR = "unknown creator";
 

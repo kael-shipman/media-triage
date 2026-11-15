@@ -42,6 +42,7 @@ One daemon, running where the files and Immich are:
 - **Filing:** once a day, at a time you choose (04:00 by default), moves what's tagged `Promote` from the inbox into
   the archive, named like the export preset. It then puts back the favorites, albums and face corrections on the new
   copies.
+- **Shows what's left to triage:** everything in the inbox is tagged `Inbox`, in both tools, until it's filed.
 - **Cleanup:** deletes sidecars whose photo is gone.
 - **Account upkeep:** creates each account's Immich libraries. One account can be limited to folders dated on or
   after a given day, and the daemon checks that it sees exactly those. It also keeps people shared and named across

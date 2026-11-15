@@ -20,7 +20,7 @@ import { type OpenAccount, openAccounts } from "../upkeep/accounts.ts";
 import { type Covered, coveredFolders, watchAllowance, watchWarning } from "./covered.ts";
 import { fullPass } from "./full-pass.ts";
 import { handleOrphans } from "./orphans.ts";
-import { type ReconcileContext, type Refreshing, reconcile } from "./reconcile.ts";
+import { type ReconcileContext, type Refreshing, reconcile, sourceOf } from "./reconcile.ts";
 import { SyncStore } from "./store.ts";
 import { consumeStream, learnAllAssets } from "./stream.ts";
 import { DirtyUnits, Watcher } from "./watcher.ts";
@@ -90,11 +90,11 @@ export class Sync {
   }
 
   /**
-   * The full pass: marks every unit whose sidecar changed since its record, or that has none, and deletes orphan
-   * sidecars whose media file has been gone for the grace period (F11).
+   * The full pass: marks every unit whose sidecar changed since its record, or that has none, or whose record is wrong
+   * about `Inbox`, and deletes orphan sidecars whose media file has been gone for the grace period (F11).
    */
   async fullPass(): Promise<void> {
-    const result = await fullPass(this.store, this.covered.folders);
+    const result = await fullPass(this.store, this.covered.folders, (path) => sourceOf(this.config, path) !== undefined);
     for (const unit of result.changed) this.dirty.add(unit);
     const { dryRun } = this.options;
     const orphans = handleOrphans(this.store, result.orphans, { graceMs: this.config.timing.orphanGraceMs, now: Date.now(), dryRun });

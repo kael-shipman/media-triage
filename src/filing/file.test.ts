@@ -31,23 +31,23 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-const synced = { rating: 3, title: "Lake day", description: null, creator: "Alex Example", tags: ["Promote"], date: "2021:06:15 10:20:30", gps: null, trashed: false, people: ["People/Kit Example"] };
+const synced = { rating: 3, title: "Lake day", description: null, creator: "Alex Example", tags: ["Inbox", "Promote"], date: "2021:06:15 10:20:30", gps: null, trashed: false, people: ["People/Kit Example"] };
 const folder = () => join(dir, "Pictures", "2021.06.15 - Lake day");
 
-/** A photo in the inbox, tagged Promote in its sidecar, with a sync record, ready to file. */
+/** A photo in the inbox, tagged Inbox and Promote in its sidecar, with a sync record, ready to file. */
 async function readyPhoto(name: string): Promise<ReadyUnit> {
   const unit = join(dir, "Inbox", "Phone", name);
   mkdirSync(dirname(unit), { recursive: true });
   copyFileSync(join(FIXTURES, "photo.jpg"), unit);
   copyFileSync(join(FIXTURES, "darktable.xmp"), `${unit}.xmp`);
   const before = (await readSidecar(exiftool, `${unit}.xmp`))!;
-  await exiftool.write(`${unit}.xmp`, { "XMP-lr:HierarchicalSubject": [...(before.fields.hierarchicalSubject ?? []), "Promote"] });
+  await exiftool.write(`${unit}.xmp`, { "XMP-lr:HierarchicalSubject": [...(before.fields.hierarchicalSubject ?? []), "Inbox", "Promote"] });
   const sidecar = (await readSidecar(exiftool, `${unit}.xmp`))!;
   ctx.store.putUnits([{ path: unit, sidecar: sidecar.stamp, synced, updated: "2026-11-04T00:00:00.000Z" }]);
   return { unit, sidecar, title: "Lake day", creator: "Alex Example", date: "2021:06:15 10:20:30", copies: [] };
 }
 
-test("a batch is moved: the files under their new names, Promote out of the sidecar, the record carried over", async () => {
+test("a batch is moved: the files under their new names, Promote and Inbox out of the sidecar, the record carried over", async () => {
   const [one, two] = [await readyPhoto("IMG_1.jpg"), await readyPhoto("IMG_2.jpg")];
   const report = await fileBatch(ctx, [one, two]);
   const [first, second] = [join(folder(), "2021.06.15-10.20.30 - Alex Example.jpg"), join(folder(), "2021.06.15-10.20.30 - Alex Example_01.jpg")];
@@ -57,6 +57,8 @@ test("a batch is moved: the files under their new names, Promote out of the side
 
   const fields = (await readSidecar(exiftool, `${first}.xmp`))!.fields;
   expect(fields.hierarchicalSubject).not.toContain("Promote");
+  expect(fields.hierarchicalSubject).not.toContain("Inbox");
+  expect(fields.subject).not.toContain("Inbox");
   expect(fields.title).toBe("Lake day");
   expect(ctx.store.unit(one.unit)).toBeUndefined();
   expect(ctx.store.unit(first)).toMatchObject({ synced: { people: ["People/Kit Example"] }, sidecar: { ino: statSync(`${first}.xmp`).ino } });
@@ -64,7 +66,7 @@ test("a batch is moved: the files under their new names, Promote out of the side
   expect(ctx.store.isBeingPutBack(first)).toBe(true);
 });
 
-test("a photo's Darktable duplicates go with it, keeping their numbers and their edits, without Promote", async () => {
+test("a photo's Darktable duplicates go with it, keeping their numbers and their edits, without Promote or Inbox", async () => {
   const one = await readyPhoto("IMG_1.jpg");
   // Darktable's duplicate 1 of IMG_1.jpg: a sidecar of its own, tagged Promote too, with its own rating.
   const duplicate = join(dirname(one.unit), "IMG_1_01.jpg.xmp");
@@ -77,6 +79,7 @@ test("a photo's Darktable duplicates go with it, keeping their numbers and their
   const moved = (await readSidecar(exiftool, join(folder(), "2021.06.15-10.20.30 - Alex Example_01.jpg.xmp")))!.fields;
   expect(moved.rating).toBe(5);
   expect(moved.hierarchicalSubject).not.toContain("Promote");
+  expect(moved.hierarchicalSubject).not.toContain("Inbox");
   expect(moved.hierarchicalSubject).toContain("Places|Lake");
 });
 

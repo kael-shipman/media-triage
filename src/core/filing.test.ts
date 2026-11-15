@@ -1,11 +1,18 @@
 import { expect, test } from "bun:test";
-import { type CopyState, type ReadinessInput, readiness, withNeedsTitle } from "./filing.ts";
+import { type CopyState, type ReadinessInput, readiness, withInbox, withNeedsTitle } from "./filing.ts";
 
 test("Promote without a title needs one; the daemon's tag goes once there's a title, or no Promote", () => {
   expect(withNeedsTitle(["Promote", "Places/Lake"], null)).toEqual(["Places/Lake", "Promote", "Promote/Needs a title"]);
   expect(withNeedsTitle(["Promote", "Promote/Needs a title"], "Lake day")).toEqual(["Promote"]);
   expect(withNeedsTitle(["Promote/Needs a title"], null)).toEqual([]);
   expect(withNeedsTitle(["Places/Lake"], null)).toEqual(["Places/Lake"]);
+});
+
+test("an inbox unit is tagged Inbox, and nothing else is", () => {
+  expect(withInbox(["Places/Lake", "Promote"], true)).toEqual(["Inbox", "Places/Lake", "Promote"]);
+  expect(withInbox(["Inbox", "Places/Lake"], true)).toEqual(["Inbox", "Places/Lake"]);
+  expect(withInbox(["Inbox", "Places/Lake"], false)).toEqual(["Places/Lake"]);
+  expect(withInbox([], false)).toEqual([]);
 });
 
 const now = Date.parse("2026-11-04T12:00:00.000Z");

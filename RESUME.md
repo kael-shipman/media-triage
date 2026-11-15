@@ -8,7 +8,8 @@ you're about to build would change it, ask the author first.
 session stops partway. Each step ends with tests passing, the type check clean, a commit and a push; CI must stay
 green.
 
-**Last updated:** 2026-11-11 (`v0.2.0`: filing only in a daily window, "Filing at night" below). **All 8 milestones are done** (the last,
+**Last updated:** 2026-11-14 (the `Inbox` tag, "The Inbox tag" below; not released yet). `v0.2.0` (2026-11-11):
+filing only in a daily window, "Filing at night" below. **All 8 milestones are done** (the last,
 filing, on 2026-11-05), and the first run over a real archive was checked and four ways it could lose data were fixed
 ("Checked before the first real run", below). `v0.1.0` was installed on the author's server and dry-run over their
 archive on 2026-11-07, which found two ways the first run would write wrong values, fixed in `v0.1.1` ("The first dry
@@ -18,7 +19,7 @@ run", below). `v0.1.1`'s dry run there was good, and **it's been live on the aut
 ## Working on it
 
 - **Bun 1.4** runs and builds it. Without Bun installed, `npx --yes bun@1.4.4` stands in for `bun`:
-  - `bun test`: the unit tests (404; 402 in CI, which skips the two that need Darktable), and the integration tests,
+  - `bun test`: the unit tests (421; 419 in CI, which skips the two that need Darktable), and the integration tests,
     skipped;
   - `bun run typecheck`: TypeScript, over `src/`, `scripts/` and `test/`;
   - `bun run build [version]`: executables for linux-x64 and linux-arm64 in `dist/` (`TARGETS=linux-x64` for one).
@@ -26,7 +27,7 @@ run", below). `v0.1.1`'s dry run there was good, and **it's been live on the aut
   `127.0.0.1:2284`, with made-up users (`alex@example.com`, the admin, and `sam@example.com`).
   - `bun run immich up` starts it (about a minute) and `bun run immich down` deletes everything. Leave it down when
     you stop: its database is in memory anyway.
-  - `MEDIA_TRIAGE_IMMICH_TESTS=1 bun test` runs everything against it (462 tests). Run it twice in a row on one
+  - `MEDIA_TRIAGE_IMMICH_TESTS=1 bun test` runs everything against it (481 tests). Run it twice in a row on one
     instance before calling a step done: tests must not depend on what other tests left behind.
   - `bun test/immich/smoke.ts` is the daemon's smoke test (about 5 minutes): it runs `media-triage run` itself, with
     two fresh accounts, and checks that it files a batch end to end (the file's header says what it does). Run it
@@ -225,6 +226,25 @@ window, nor is a dry run. A daemon that isn't running for the whole window files
 catch-up, so a restart in the afternoon doesn't move anything. The smoke test sets `at` to the time it starts.
 
 On the author's server: `at = "02:00"` (its time zone is America/Chicago).
+
+## The Inbox tag (2026-11-14, unreleased)
+
+The author asked for it: Immich's timeline is by date, so filing a photo didn't change what they saw, and what was
+still to triage was hard to find. Now every unit in an inbox source is tagged `Inbox`, and nothing else is (DESIGN.md
+section 7, `withInbox` in `src/core/filing.ts`): the reconcile adds it (back, if it was taken off), filing takes it out
+with `Promote`, and the full pass returns units whose record is wrong about it, so the inbox already recorded gets it
+on the first full pass after the upgrade (about 1,490 units on the author's server: a sidecar write and a read per
+copy each, once).
+
+Found building it, and fixed (DESIGN.md section 5): a copy whose edit the merge undid was never asked to read the
+sidecar again. `Inbox` taken off in Immich: Immich writes `TagsList` without it, the reconcile writes it back, and the
+sidecar is byte for byte what the copies were last asked to read, so `askable` said no. A sidecar the daemon has just
+written is now always asked for. The same applied to `Promote/Needs a title` taken off in Immich, before.
+
+Tests: `withInbox`; the full pass's `Inbox` check (`watch.test.ts`); filing takes `Inbox` off, duplicates' sidecars
+too (`file.test.ts`); end to end, "an inbox unit is tagged Inbox…" (`reconcile.test.ts`; it failed every time
+without the fix), and `Inbox` checks in the filing test and the smoke test (27 of 27). All 481 tests passed twice in
+a row against the development Immich.
 
 ## Next: running it for real
 
