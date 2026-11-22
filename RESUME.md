@@ -8,8 +8,9 @@ you're about to build would change it, ask the author first.
 session stops partway. Each step ends with tests passing, the type check clean, a commit and a push; CI must stay
 green.
 
-**Last updated:** 2026-11-20 (milestones 9 and 10, edits, planned: DESIGN.md section 14; not started).
-2026-11-14: `v0.3.0`, the `Inbox` tag, "The Inbox tag" below. `v0.2.0` (2026-11-11): filing
+**Last updated:** 2026-11-21 (`v0.4.0`: the creator as the tag `Creator/<creator>`, "The creator's tag" below).
+2026-11-20: milestones 9 and 10, edits, planned (DESIGN.md section 14; not started). 2026-11-14: `v0.3.0`, the
+`Inbox` tag, "The Inbox tag" below. `v0.2.0` (2026-11-11): filing
 only in a daily window, "Filing at night" below. **All 8 milestones are done** (the last,
 filing, on 2026-11-05), and the first run over a real archive was checked and four ways it could lose data were fixed
 ("Checked before the first real run", below). `v0.1.0` was installed on the author's server and dry-run over their
@@ -20,7 +21,7 @@ run", below). `v0.1.1`'s dry run there was good, and **it's been live on the aut
 ## Working on it
 
 - **Bun 1.4** runs and builds it. Without Bun installed, `npx --yes bun@1.4.4` stands in for `bun`:
-  - `bun test`: the unit tests (421; 419 in CI, which skips the two that need Darktable), and the integration tests,
+  - `bun test`: the unit tests (437; 435 in CI, which skips the two that need Darktable), and the integration tests,
     skipped;
   - `bun run typecheck`: TypeScript, over `src/`, `scripts/` and `test/`;
   - `bun run build [version]`: executables for linux-x64 and linux-arm64 in `dist/` (`TARGETS=linux-x64` for one).
@@ -28,7 +29,7 @@ run", below). `v0.1.1`'s dry run there was good, and **it's been live on the aut
   `127.0.0.1:2284`, with made-up users (`alex@example.com`, the admin, and `sam@example.com`).
   - `bun run immich up` starts it (about a minute) and `bun run immich down` deletes everything. Leave it down when
     you stop: its database is in memory anyway.
-  - `MEDIA_TRIAGE_IMMICH_TESTS=1 bun test` runs everything against it (481 tests). Run it twice in a row on one
+  - `MEDIA_TRIAGE_IMMICH_TESTS=1 bun test` runs everything against it (498 tests). Run it twice in a row on one
     instance before calling a step done: tests must not depend on what other tests left behind.
   - `bun test/immich/smoke.ts` is the daemon's smoke test (about 5 minutes): it runs `media-triage run` itself, with
     two fresh accounts, and checks that it files a batch end to end (the file's header says what it does). Run it
@@ -47,7 +48,7 @@ run", below). `v0.1.1`'s dry run there was good, and **it's been live on the aut
 - **Immich's source**, for checking behavior: the fork's clone at `~/Desktop/tmp-repos/immich`, branch `twins`, based
   on v3.3.5. Look in `server/src`: `controllers/`, `dtos/`, `services/`, `repositories/`. Use Immich only through
   its API, never its database.
-- **Releases:** `v0.3.0` (2026-11-14, the `Inbox` tag), `v0.2.0` (2026-11-11, filing at a set time), `v0.1.3` (2026-11-09, the refresh loop), `v0.1.2` (2026-11-08, duplicates filed, the watcher's names), `v0.1.1` (2026-11-07, the fixes from the
+- **Releases:** `v0.4.0` (2026-11-21, the creator's tag), `v0.3.0` (2026-11-14, the `Inbox` tag), `v0.2.0` (2026-11-11, filing at a set time), `v0.1.3` (2026-11-09, the refresh loop), `v0.1.2` (2026-11-08, duplicates filed, the watcher's names), `v0.1.1` (2026-11-07, the fixes from the
   first dry run on the author's archive), `v0.1.0`
   (2026-11-07, everything through milestone 8 and the fixes of 2026-11-05), and the
   pre-releases `v0.1.0-rc.1` and `rc.2`, from milestone 1 only. Pushing a tag `vX.Y.Z` publishes a release
@@ -213,8 +214,8 @@ On the author's server: `v0.1.3` installed with `media-triage upgrade` (2026-11-
 reconciled the 105 units waiting in the stream: it would write only the 6 new phone photos' sidecars (their capture
 time and GPS), and none of the looping ones. The service is started again by the author.
 
-Not changed: an account whose session was revoked is warned about on every run ("account left out of sync"); Jess's
-was revoked when her phone app was set up, and the warning repeated every few seconds. Logging it once per change
+Not changed: an account whose session was revoked is warned about on every run ("account left out of sync"); the
+second account's was revoked when its phone app was set up, and the warning repeated every few seconds. Logging it once per change
 would be quieter.
 
 ## Filing at night (2026-11-11, `v0.2.0`)
@@ -246,6 +247,39 @@ Tests: `withInbox`; the full pass's `Inbox` check (`watch.test.ts`); filing take
 too (`file.test.ts`); end to end, "an inbox unit is tagged Inbox…" (`reconcile.test.ts`; it failed every time
 without the fix), and `Inbox` checks in the filing test and the smoke test (27 of 27). All 481 tests passed twice in
 a row against the development Immich.
+
+## The creator's tag (2026-11-21, `v0.4.0`)
+
+The author asked for it: Immich shows no creator at all (it reads neither `dc:creator` nor EXIF's Artist; checked in
+its source), so the creator F2 sets, which filing names files by, couldn't be seen or changed there. Now it's the tag
+`Creator/<creator>`, kept equal to `dc:creator` exactly as `Title/<title>` is to `dc:title` (DESIGN.md F3), across the
+whole archive (the author chose that over the inbox only, knowing the cost below):
+- `src/core/titles.ts` holds both, as one `FieldTag` shape (`TITLE`, `CREATOR`); the merge takes the title and the
+  creator from the merged tags, and two of either are a conflict (`src/core/merge.ts`).
+- The tags go in `TagsList` only (`planWrite`, `src/core/xmp.ts`), never in Darktable's tag fields.
+- F2 gives the source's creator **on first contact only** (no record yet). After that, one taken off stays off.
+- Filing needs a creator: without one, `Promote/Needs a creator` (`withNeeds`, `src/core/filing.ts`), taken off when
+  filing, like `Promote/Needs a title`. `ReadyUnit.creator` is no longer nullable.
+- **Records from before 0.4.0** hold a creator that was never a tag, which Immich's copies never showed. Put in the
+  base's tags, the copies' lack of it would read as their removing it, and every creator would be wiped. So the base
+  holds it only where the record says it was a tag (`creatorTag`, new in `SyncedValues`), and the full pass returns
+  records without it (`src/sync/full-pass.ts`). **The first run after upgrading writes `TagsList` into every sidecar
+  that has a creator** (about 15,500 on the author's server: one write and a read per copy each, once).
+- A dry run now also logs how many sidecars it would write each field in ("would write, by field"), to check a large
+  first run by its shape.
+
+Found testing it: **Immich can undo a quick second edit by itself.** After writing a sidecar, it queues a metadata
+extraction that reads it back, and unlocks the field it wrote (`job.service.ts` `onDone`, `handleSidecarWrite`). Two
+tag edits on one asset a moment apart: the first write's read-back can land after the second edit and restore the
+first state. A person swapping a creator in the app (one tag on, one off) is normally slower than that. The test paces
+its edits (`immichIdle` in the harness waits for Immich's queues to empty). Between the two edits, the unit may have
+two creators, which is a conflict for a moment (logged and left alone), or none.
+
+Tests: `titles.test.ts` (creators), the merge's creator cases (including a record from before 0.4.0), `withNeeds` and
+readiness, `planWrite` (a creator alone writes `TagsList`; a change or removal), the full pass's `creatorTag` check
+(`watch.test.ts`), and end to end "the creator is the tag Creator/<creator> in Immich…" (`reconcile.test.ts`): a
+change in Immich reaches Darktable and filing, and one taken off isn't put back. All 498 tests passed twice in a row against the development Immich, and the
+smoke test (27 of 27).
 
 ## Next: running it for real
 
@@ -425,6 +459,8 @@ first live write (DESIGN.md section 9).
 ## Gotchas
 
 - **picomatch reads `[!…]` as a literal "!"**, not a negation: write negated brackets as `[^…]`.
+- **Immich reads a sidecar back after writing it,** so two quick edits to one asset can lose the second ("The
+  creator's tag", above). In tests, wait for its queues (`immichIdle`) between edits that must both land.
 - **`Bun.spawnSync` blocks the event loop.** A child process that calls a `Bun.serve` running in the same test
   process deadlocks. Use `Bun.spawn` and await it.
 - **`pkill -f <pattern>` can match your own shell command** and kill it.

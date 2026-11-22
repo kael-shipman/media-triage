@@ -6,6 +6,7 @@
 import fastGlob from "fast-glob";
 import { join } from "node:path";
 import type { Config } from "../config.ts";
+import { NO_CREATOR, NO_TITLE } from "../core/filing.ts";
 import { filingWindow } from "../core/filing-window.ts";
 import { PROMOTE_TAG } from "../core/naming.ts";
 import { PathMap } from "../core/path-map.ts";
@@ -195,7 +196,10 @@ export class Sync {
     const filed = report ? await fileBatch(ctx, report.ready) : { filed: [], problems: [] };
 
     const problems = new Map([...finished.problems, ...filed.problems].map(({ unit, problem }) => [unit, problem]));
-    for (const { unit, why } of report?.notReady ?? []) if (why === "it has no title") problems.set(unit, "it's tagged Promote, but has no title");
+    for (const { unit, why } of report?.notReady ?? []) {
+      if (why === NO_TITLE) problems.set(unit, "it's tagged Promote, but has no title");
+      if (why === NO_CREATOR) problems.set(unit, "it's tagged Promote, but has no creator");
+    }
     for (const [unit, problem] of problems) if (this.filingProblems.get(unit) !== problem) log.warn("not filed", { unit, problem });
     this.filingProblems = problems;
     if (filed.filed.length > 0) log.info(this.options.dryRun ? "would file (dry run)" : "filed a batch", { units: filed.filed.length });

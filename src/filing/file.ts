@@ -9,7 +9,7 @@
 import { linkSync, mkdirSync, statSync, unlinkSync } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
 import { isVideo } from "../core/media.ts";
-import { INBOX_TAG, NEEDS_TITLE_TAG, PROMOTE_TAG } from "../core/naming.ts";
+import { INBOX_TAG, NEEDS_CREATOR_TAG, NEEDS_TITLE_TAG, PROMOTE_TAG } from "../core/naming.ts";
 import { PathMap } from "../core/path-map.ts";
 import { darktableReads } from "../core/xmp.ts";
 import { listLibraries, scanLibrary } from "../immich/libraries.ts";
@@ -121,7 +121,7 @@ function identity(path: string): string | undefined {
  * is looked at afresh next time. Finishing a plan cut short reads the sidecar as it is.
  */
 async function fileUnit(ctx: ReconcileContext, filings: FilingStore, plan: UnitPlan, ready?: Sidecar): Promise<{ problem?: string }> {
-  // 1. Promote, Promote/Needs a title and Inbox out of the sidecar, and its Darktable duplicates', wherever each is now, so the
+  // 1. Promote, Promote/Needs a title (or a creator) and Inbox out of the sidecar, and its Darktable duplicates', wherever each is now, so the
   // new copies arrive without them. exiftool writes a new file, so a sidecar already linked at its new name loses its
   // old name first.
   const untouched = plan.moves.every((move) => identity(move.from) && !identity(move.to));
@@ -168,7 +168,7 @@ function isDuplicateSidecar(unit: string, path: string): boolean {
 }
 
 /**
- * Takes Promote, Promote/Needs a title and Inbox out of one sidecar about to move, at its old name or its new one. True if it
+ * Takes Promote, Promote/Needs a title (or a creator) and Inbox out of one sidecar about to move, at its old name or its new one. True if it
  * changed meanwhile: `ready` (the sidecar as it was when the unit was found ready) has changed since, or it changed
  * while being written.
  */
@@ -179,7 +179,7 @@ async function withoutTriageTags(ctx: ReconcileContext, move: Move, ready?: Side
   if (!sidecar) return false;
   if (ready !== undefined && !sameStamp(stampOf(ready.path), ready.stamp)) return true;
   const before = darktableReads(sidecar.fields).tags;
-  const tags = before.filter((tag) => tag !== PROMOTE_TAG && tag !== NEEDS_TITLE_TAG && tag !== INBOX_TAG);
+  const tags = before.filter((tag) => tag !== PROMOTE_TAG && tag !== NEEDS_TITLE_TAG && tag !== NEEDS_CREATOR_TAG && tag !== INBOX_TAG);
   return tags.length !== before.length && (await writeSidecar(ctx.exiftool, sidecar, { tags })).status === "changed-meanwhile";
 }
 

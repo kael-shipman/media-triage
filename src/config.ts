@@ -16,7 +16,7 @@ export const TRACKS: readonly Track[] = ["patch", "minor", "major"];
 export interface Source {
   /** A direct subfolder of the inbox. */
   folder: string;
-  /** The creator (`dc:creator`) its files get when they have none. */
+  /** The creator (`dc:creator`, and `Creator/<creator>` in Immich) its files get when they arrive without one (F2). */
   creator: string;
 }
 

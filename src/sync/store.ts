@@ -72,6 +72,11 @@ export interface PersonRecord {
 export interface SyncedValues extends Base {
   title: string | null;
   creator: string | null;
+  /**
+   * The creator was the tag `Creator/<creator>` at this sync (F3, since 0.4.0). Before, Immich's copies didn't show it,
+   * so it isn't in the base's tags.
+   */
+  creatorTag?: boolean;
   /** The `People/…` tags the daemon made from faces (F10); others are hand made, and never removed. */
   people?: string[];
   /** The face regions the daemon made (F10), so they can be told from other tools' regions. */

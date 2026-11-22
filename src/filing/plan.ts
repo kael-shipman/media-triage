@@ -49,7 +49,7 @@ export const disk: Disk = {
 export interface PlanInput {
   unit: string;
   title: string;
-  creator: string | null;
+  creator: string;
   /** The capture time as the merge has it, or null. */
   date: string | null;
   /** A copy's dates, for when the sidecar has none: Immich's own (its `localDateTime`), as for a video. */
@@ -87,7 +87,7 @@ export function planUnit(config: Config, input: PlanInput, taken: Set<string>, o
   const copies = duplicates(input.unit, on.list(dirname(input.unit)));
 
   const root = isVideo(input.unit) ? config.filing.videos : config.filing.photos;
-  const name = filingName({ root, time, title: input.title, creator: input.creator ?? undefined });
+  const name = filingName({ root, time, title: input.title, creator: input.creator });
   const folder = join(config.paths.archive, name.folder);
   if (on.device(folder) !== on.device(input.unit)) return { problem: `the archive is on another filesystem than ${dirname(input.unit)}` };
 

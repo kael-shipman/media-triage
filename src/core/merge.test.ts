@@ -16,12 +16,12 @@ function merged(...args: Parameters<typeof mergeUnit>) {
 
 describe("mergeUnit", () => {
   test("nothing changed anywhere: the base, with nothing attributed", () => {
-    const result = merged(base, "Lake day", [same("darktable", 1), same("alex", 2, { trashed: false }), same("sam", 3, { trashed: false })]);
-    expect(result).toEqual({ ...base, title: "Lake day", from: {} });
+    const result = merged(base, { title: "Lake day" }, [same("darktable", 1), same("alex", 2, { trashed: false }), same("sam", 3, { trashed: false })]);
+    expect(result).toEqual({ ...base, title: "Lake day", creator: null, from: {} });
   });
 
   test("tags merge tag by tag, from every side", () => {
-    const result = merged(base, "Lake day", [
+    const result = merged(base, { title: "Lake day" }, [
       same("darktable", 1, { tags: ["Places/Lake", "Title/Lake day", "People/Robin"] }),
       same("alex", 2, { tags: ["Title/Lake day"] }),
       same("sam", 3),
@@ -32,7 +32,7 @@ describe("mergeUnit", () => {
   });
 
   test("the latest change wins for the rating, description, date and GPS", () => {
-    const result = merged(base, "Lake day", [
+    const result = merged(base, { title: "Lake day" }, [
       same("darktable", 10, { rating: 5, date: "2021:06:15 11:00:00.000", gps: { latitude: 1, longitude: 2 } }),
       same("alex", 20, { rating: 1, description: "Changed" }),
       same("sam", 5, { rating: 4 }),
@@ -42,18 +42,51 @@ describe("mergeUnit", () => {
   });
 
   test("a date that differs only in its offset, or a rating of 0, isn't a change", () => {
-    const result = merged({ ...base, rating: null }, "Lake day", [same("darktable", 10, { rating: 0 }), same("alex", 20, { rating: null, date: "2021:06:15 10:20:30.000+02:00" })]);
+    const result = merged({ ...base, rating: null }, { title: "Lake day" }, [same("darktable", 10, { rating: 0 }), same("alex", 20, { rating: null, date: "2021:06:15 10:20:30.000+02:00" })]);
     expect(result.from).toEqual({});
   });
 
   test("two titles are a conflict, and so is a title that can't be a folder name", () => {
-    expect(mergeUnit(base, "Lake day", [same("darktable", 1, { tags: ["Title/Lake day", "Title/Other"] })])).toEqual({ conflict: 'it has two titles: "Lake day" and "Other"' });
+    expect(mergeUnit(base, { title: "Lake day" }, [same("darktable", 1, { tags: ["Title/Lake day", "Title/Other"] })])).toEqual({ conflict: 'it has two titles: "Lake day" and "Other"' });
     expect(mergeUnit(undefined, undefined, [same("darktable", 1, { tags: ["Title/A|B"] })])).toMatchObject({ conflict: expect.stringContaining("can't be used") });
   });
 
   test("a title removed in one tool is removed", () => {
-    const result = merged(base, "Lake day", [same("darktable", 1, { tags: ["Places/Lake"] }), same("alex", 2)]);
+    const result = merged(base, { title: "Lake day" }, [same("darktable", 1, { tags: ["Places/Lake"] }), same("alex", 2)]);
     expect(result.title).toBeNull();
+  });
+
+  describe("the creator, as the tag Creator/<creator>", () => {
+    const withCreator = (name: string, at: number, creator: string) => same(name, at, { tags: ["Places/Lake", "Title/Lake day", `Creator/${creator}`] });
+    const held = { title: "Lake day", creator: "Alex Example" };
+
+    test("is merged like the title, and kept out of the other tags", () => {
+      const result = merged(base, held, [withCreator("darktable", 1, "Alex Example"), withCreator("alex", 2, "Alex Example")]);
+      expect(result).toMatchObject({ creator: "Alex Example", title: "Lake day", tags: ["Places/Lake"], from: {} });
+    });
+
+    test("changed in Immich (one tag off, another on), it changes everywhere", () => {
+      const result = merged(base, held, [withCreator("darktable", 1, "Alex Example"), withCreator("alex", 2, "Sam Example")]);
+      expect(result.creator).toBe("Sam Example");
+    });
+
+    test("removed in one tool, it's removed", () => {
+      const result = merged(base, held, [same("darktable", 1), withCreator("alex", 2, "Alex Example")]);
+      expect(result.creator).toBeNull();
+    });
+
+    test("one that wasn't a tag at the last sync (before 0.4.0) isn't removed by copies that never showed it", () => {
+      // The base doesn't hold it as a tag, so Darktable's creator is an addition, and the copies' lack of it no change.
+      const result = merged(base, { title: "Lake day" }, [withCreator("darktable", 1, "Alex Example"), same("alex", 2), same("sam", 3)]);
+      expect(result.creator).toBe("Alex Example");
+    });
+
+    test("two creators are a conflict, and so is one that can't be a tag", () => {
+      expect(mergeUnit(base, held, [same("darktable", 1, { tags: ["Creator/Alex Example", "Creator/Sam Example"] })])).toEqual({
+        conflict: 'it has two creators: "Alex Example" and "Sam Example"',
+      });
+      expect(mergeUnit(undefined, undefined, [same("darktable", 1, { tags: ["Creator/A|B"] })])).toMatchObject({ conflict: expect.stringContaining("can't be used") });
+    });
   });
 
   test("without a base: the union of tags, and the sidecar's values, which copies only fill in", () => {
@@ -70,7 +103,7 @@ describe("mergeUnit", () => {
     // It never read the sidecar (F1), or it can't show a reject (-1): it said no rating, no title and no tags then, and
     // still does.
     const last = { rating: null, description: null, tags: [], date: "2021:06:15 10:20:30.000", gps: null, trashed: false };
-    const result = merged({ ...base, rating: -1 }, "Lake day", [same("darktable", 1, { rating: -1 }), { name: "alex", at: 99, values: last, last }]);
+    const result = merged({ ...base, rating: -1 }, { title: "Lake day" }, [same("darktable", 1, { rating: -1 }), { name: "alex", at: 99, values: last, last }]);
     expect(result).toMatchObject({ rating: -1, title: "Lake day", tags: ["Places/Lake"], description: "A day out" });
     expect(result.from).toEqual({});
   });
@@ -79,7 +112,7 @@ describe("mergeUnit", () => {
     const lastOf = { rating: 3, description: "A day out", tags: ["Places/Lake", "Title/Lake day"], date: "2021:06:15 10:20:30.000", gps: null, trashed: false };
     // Alex added A; then Sam added B, and Sam's copy rewrote the sidecar's Immich tags without A. Darktable's fields
     // haven't been written yet.
-    const result = merged(base, "Lake day", [
+    const result = merged(base, { title: "Lake day" }, [
       same("darktable", 1),
       { name: "alex", at: 2, values: { ...lastOf, tags: [...lastOf.tags, "A"], rating: 4 }, last: lastOf },
       { name: "sam", at: 3, values: { ...lastOf, tags: [...lastOf.tags, "B"] }, last: lastOf },
@@ -88,8 +121,8 @@ describe("mergeUnit", () => {
   });
 
   test("F8: a trash on a copy that's online is mirrored, an offline one isn't, and a restore is", () => {
-    expect(merged(base, "Lake day", [same("alex", 2, { trashed: true }), same("sam", 1, { trashed: false })]).trashed).toBe(true);
-    expect(merged(base, "Lake day", [same("alex", 2, { trashed: true, offline: true }), same("sam", 1, { trashed: false })]).trashed).toBe(false);
-    expect(merged({ ...base, trashed: true }, "Lake day", [same("alex", 2, { trashed: false }), same("sam", 1, { trashed: true })]).trashed).toBe(false);
+    expect(merged(base, { title: "Lake day" }, [same("alex", 2, { trashed: true }), same("sam", 1, { trashed: false })]).trashed).toBe(true);
+    expect(merged(base, { title: "Lake day" }, [same("alex", 2, { trashed: true, offline: true }), same("sam", 1, { trashed: false })]).trashed).toBe(false);
+    expect(merged({ ...base, trashed: true }, { title: "Lake day" }, [same("alex", 2, { trashed: false }), same("sam", 1, { trashed: true })]).trashed).toBe(false);
   });
 });

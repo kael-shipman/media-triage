@@ -89,14 +89,17 @@ async function indexed(prefix: string, options: { sidecarAfter?: boolean; rating
 }
 
 describeImmich("the first run over an archive Immich already indexed", () => {
-  test("an ordinary sidecar keeps everything, and only gains the title's tag for Immich", async () => {
+  test("an ordinary sidecar keeps everything, and only gains the title's and the creator's tags for Immich", async () => {
     const { twice, fields, read } = await indexed("first-ordinary");
     await twice();
     const after = await fields();
     expect(after).toMatchObject({ rating: 3, title: "Lake day", description: "A day by the lake" });
     expect(after.hierarchicalSubject?.toSorted()).toEqual(["People|Robin Example", "Places|Lake", "darktable|format|jpg"]);
-    expect(after.tagsList?.toSorted()).toEqual(["People/Robin Example", "Places/Lake", "Title/Lake day"]);
-    await waitFor("the title's tag in Immich", async () => ((await read()).tags?.some((tag) => tag.value === "Title/Lake day") ? true : undefined));
+    expect(after.tagsList?.toSorted()).toEqual(["Creator/Alex Example", "People/Robin Example", "Places/Lake", "Title/Lake day"]);
+    await waitFor("the title's and the creator's tags in Immich", async () => {
+      const tags = (await read()).tags?.map((tag) => tag.value) ?? [];
+      return tags.includes("Title/Lake day") && tags.includes("Creator/Alex Example") ? true : undefined;
+    });
   }, 120_000);
 
   test("a sidecar Immich never read (made after it indexed the photo) loses nothing to the copy that didn't read it", async () => {
@@ -116,11 +119,11 @@ describeImmich("the first run over an archive Immich already indexed", () => {
   }, 120_000);
 
   test("tags the image file embeds don't come back into Darktable, and Immich then shows the sidecar's", async () => {
-    // An older JPEG, tagged by another program before the tags were reorganized in Darktable, and without a title, so
-    // nothing else would write TagsList.
+    // An older JPEG, tagged by another program before the tags were reorganized in Darktable, and without a title or
+    // a creator, so nothing else would write TagsList.
     const { twice, fields, read } = await indexed("first-embedded", {
       image: { "XMP-digiKam:TagsList": ["People/Family/Robin Example", "Places/Lake", "Old/Tag"] },
-      sidecar: { "XMP-dc:Title": null },
+      sidecar: { "XMP-dc:Title": null, "XMP-dc:Creator": null },
     });
     expect((await read()).tags?.map((tag) => tag.value).toSorted()).toEqual(["Old/Tag", "People/Family/Robin Example", "Places/Lake"]);
     await twice();

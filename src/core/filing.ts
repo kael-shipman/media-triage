@@ -1,17 +1,20 @@
-// When an inbox unit is filed (DESIGN.md, section 7): it's tagged `Promote` and has a title, after the merge; no copy
-// is in the trash and it isn't rejected; and it has settled: every copy agrees with the sidecar, and nothing about the
-// unit changed for the settle time. Without a title, it gets `Promote/Needs a title` instead, so the problem shows in
-// both tools. Every inbox unit is tagged `Inbox`, until it's filed.
+// When an inbox unit is filed (DESIGN.md, section 7): it's tagged `Promote` and has a title and a creator, after the
+// merge; no copy is in the trash and it isn't rejected; and it has settled: every copy agrees with the sidecar, and
+// nothing about the unit changed for the settle time. Without a title, it gets `Promote/Needs a title` instead, and
+// without a creator `Promote/Needs a creator`, so the problem shows in both tools. Every inbox unit is tagged `Inbox`,
+// until it's filed.
 
-import { INBOX_TAG, NEEDS_TITLE_TAG, PROMOTE_TAG } from "./naming.ts";
+import { INBOX_TAG, NEEDS_CREATOR_TAG, NEEDS_TITLE_TAG, PROMOTE_TAG } from "./naming.ts";
 
 /**
- * An inbox unit's tags with `Promote/Needs a title` where it's tagged `Promote` but has no title, and without it
- * everywhere else: the daemon's own tag, cleared once there's a title or no `Promote`.
+ * An inbox unit's tags with `Promote/Needs a title` where it's tagged `Promote` but has no title, and
+ * `Promote/Needs a creator` where it has no creator, and without them everywhere else: the daemon's own tags, each
+ * cleared once there's the value or no `Promote`.
  */
-export function withNeedsTitle(tags: readonly string[], title: string | null): string[] {
-  const others = tags.filter((tag) => tag !== NEEDS_TITLE_TAG);
-  return (others.includes(PROMOTE_TAG) && title === null ? [...others, NEEDS_TITLE_TAG] : others).sort();
+export function withNeeds(tags: readonly string[], values: { title: string | null; creator: string | null }): string[] {
+  const others = tags.filter((tag) => tag !== NEEDS_TITLE_TAG && tag !== NEEDS_CREATOR_TAG);
+  if (!others.includes(PROMOTE_TAG)) return others.sort();
+  return [...others, ...(values.title === null ? [NEEDS_TITLE_TAG] : []), ...(values.creator === null ? [NEEDS_CREATOR_TAG] : [])].sort();
 }
 
 /**
@@ -35,9 +38,10 @@ export interface CopyState {
 }
 
 export interface ReadinessInput {
-  /** The merged tags, without the title. */
+  /** The merged tags, without the title and the creator. */
   tags: readonly string[];
   title: string | null;
+  creator: string | null;
   /** The sidecar's rating: -1 is Darktable's reject. */
   rating: number | undefined;
   copies: readonly CopyState[];
@@ -49,11 +53,15 @@ export interface ReadinessInput {
   now: number;
 }
 
+export const NO_TITLE = "it has no title";
+export const NO_CREATOR = "it has no creator";
+
 export type Readiness = { ready: true } | { ready: false; why: string; inMs?: number };
 
 export function readiness(input: ReadinessInput): Readiness {
   if (!input.tags.includes(PROMOTE_TAG)) return { ready: false, why: "it isn't tagged Promote" };
-  if (input.title === null) return { ready: false, why: "it has no title" };
+  if (input.title === null) return { ready: false, why: NO_TITLE };
+  if (input.creator === null) return { ready: false, why: NO_CREATOR };
   if (input.rating === -1) return { ready: false, why: "it's rejected" };
   if (input.copies.some((copy) => copy.trashed)) return { ready: false, why: "a copy is in the trash" };
   if (input.unreadable > 0) return { ready: false, why: "a copy's account isn't open, so its state can't be read" };

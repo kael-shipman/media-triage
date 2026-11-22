@@ -14,7 +14,8 @@ archive = "/srv/media"
 # The state folder: the database, the Immich sessions and the logs. Never inside a synced folder.
 # state = "~/.local/state/media-triage"
 
-# One block per inbox subfolder. Files there get this creator (dc:creator) when they have none.
+# One block per inbox subfolder. Files there get this creator (dc:creator, and the tag Creator/<creator> in Immich)
+# when they arrive without one.
 [[sources]]
 folder = "Alex Phone"
 creator = "Alex Example"

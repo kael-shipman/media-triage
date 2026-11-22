@@ -153,6 +153,22 @@ test("the full pass returns units whose record is wrong about Inbox: one in the 
   state.close();
 });
 
+test("the full pass returns units recorded with a creator that wasn't yet its tag (before 0.4.0), so they get Creator/<creator>", async () => {
+  const state = State.open(join(dir, "state"));
+  const store = new SyncStore(state.db);
+  const archive = join(dir, "media", "Pictures");
+  for (const name of ["old.jpg", "tagged.jpg", "none.jpg"]) touch(join(archive, name));
+  const synced = { rating: null, title: null, description: null, creator: null, tags: [], date: null, gps: null, trashed: false };
+  const updated = "2026-11-21T00:00:00.000Z";
+  store.putUnits([
+    { path: join(archive, "old.jpg"), synced: { ...synced, creator: "Alex Example" }, updated },
+    { path: join(archive, "tagged.jpg"), synced: { ...synced, creator: "Alex Example", creatorTag: true }, updated },
+    { path: join(archive, "none.jpg"), synced, updated },
+  ]);
+  expect((await fullPass(store, [archive])).changed).toEqual([join(archive, "old.jpg")]);
+  state.close();
+});
+
 test("the full pass counts a link to a file as a file, as Immich does, but doesn't enter a linked folder", async () => {
   const state = State.open(join(dir, "state"));
   const store = new SyncStore(state.db);

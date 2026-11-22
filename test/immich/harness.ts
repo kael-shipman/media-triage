@@ -78,6 +78,22 @@ export async function waitFor<T>(what: string, check: () => Promise<T | undefine
   }
 }
 
+/**
+ * Waits until no Immich queue has work, active, waiting or delayed (an admin's token). Before an edit in Immich that
+ * a read still queued would undo: a metadata extraction reads the sidecar as it was.
+ */
+export async function immichIdle(adminToken: string, timeoutMs = 60_000): Promise<void> {
+  type Queue = { name: string; statistics: { active: number; waiting: number; delayed: number } };
+  await waitFor(
+    "Immich's queues to empty",
+    async () => {
+      const queues = await api<Queue[]>("GET", "/queues", { token: adminToken });
+      return queues.every(({ statistics }) => statistics.active + statistics.waiting + statistics.delayed === 0) ? true : undefined;
+    },
+    timeoutMs,
+  );
+}
+
 /** The fixtures folder: small media files with made-up metadata. */
 export const FIXTURES = join(import.meta.dir, "..", "fixtures");
 

@@ -70,7 +70,8 @@ video. Units in the archive count as much as units in the inbox (section 1).
 
 1. **Files:** inotify on the covered folders (section 1), with a watch per folder. It sees files arriving from the
    phones, Darktable's sidecars, and Immich's sidecar writes. A full pass over the same folders at start, and then
-   daily, catches anything missed (`src/sync/`). It also returns a unit whose record is wrong about `Inbox` (section 7).
+   daily, catches anything missed (`src/sync/`). It also returns a unit whose record is wrong about `Inbox` (section 7),
+   and one recorded before its creator was a tag (F3).
    - A unit is a media file Immich indexes and its `<file>.<ext>.xmp`, the one name Darktable reads. Other sidecar
      names (`<stem>.xmp`, a Darktable duplicate's `<stem>_01.<ext>.xmp`), hidden and temporary files, and Syncthing's
      conflict copies aren't synced. A sidecar named like a duplicate's is one only if no media file has its name and
@@ -272,13 +273,28 @@ If the state is lost, merge as a union, which never drops a tag, and report it.
     take too. The setting `immich.reads_new_sidecars` says whether the server has it. On a server without it, the
     daemon still refreshes, sidecars that appeared after indexing stay unread there, and it warns when it makes one
     (F2).
-- **F2. Creator.** A file in an inbox source with no `dc:creator` gets the source's creator. An existing creator is
-  never overwritten. Most new photos have no sidecar yet, so create a minimal `<file>.<ext>.xmp`, the name both tools
+- **F2. Creator.** On first contact (no record yet), a file in an inbox source with no `dc:creator` gets the source's
+  creator. An existing creator is never overwritten. After that, the creator is merged like any other value (F3): one
+  taken off stays off, and filing asks for one (section 7). Before 0.4.0 the source's creator was put back whenever
+  there was none. Most new photos have no sidecar yet, so create a minimal `<file>.<ext>.xmp`, the name both tools
   look for first. It's written under a hidden temporary name and linked into place, which fails if a sidecar appeared
   in the meantime, so it never replaces one (`src/sidecars/sidecar.ts`, `createSidecar`).
-- **F3. Title.** The tag `Title/<title>` (Immich) and `dc:title` (Darktable) stay equal.
-  - Two different titles on one photo are a conflict: report it and change nothing.
-  - A `/` or `|` in a title is refused: it would nest the tag in one of the tools.
+- **F3. Title and creator.** Darktable keeps each in a field of its own, which Immich doesn't show, so in Immich each
+  is a tag under a parent (`src/core/titles.ts`):
+  - the tag `Title/<title>` (Immich) and `dc:title` (Darktable) stay equal;
+  - the tag `Creator/<creator>` (Immich) and `dc:creator` (Darktable) stay equal (asked for by the author,
+    2026-11-21: Immich reads no creator at all).
+
+  The tags are in `TagsList` only, never in Darktable's tag fields. In the merge, each side's tags include them, so
+  a change in either tool is a tag added or removed. Changing a creator in Immich is taking one tag off and putting
+  another on.
+  - Two different titles, or two creators, on one photo are a conflict: report it and change nothing.
+  - A `/` or `|` in either is refused: it would nest the tag in one of the tools.
+  - **Records from before 0.4.0** have a creator that wasn't a tag, which Immich's copies never showed. So the base
+    holds the creator's tag only when its record says it was one (`creatorTag`). Otherwise the copies' lack of it would
+    read as their taking it off. The full pass also returns those records (section 3), so every photo with a creator
+    gets its tag without waiting for an edit. On the author's archive that's a one-time write of about 15,500
+    sidecars, each re-read by every copy.
 - **F4. Tags.** Immich's `digiKam:TagsList` (`Parent/Child`) and Darktable's `lr:hierarchicalSubject` (`Parent|Child`)
   plus `dc:subject` (every part of every tag) stay equal, by a three-way merge against the last-synced set.
   - **Each tool shows each tag once,** in its own notation, because each reads exactly one field and never the other
@@ -287,7 +303,7 @@ If the state is lost, merge as a union, which never drops a tag, and report it.
     - Darktable reads `lr:hierarchicalSubject`, or `dc:subject` when there's none (`src/common/exif.cc`).
   - **Translating:** split on `|`, turn each `/` inside a part into `|`, and join with `/`. That's Immich's own
     conversion (`getTagList`), so a Darktable tag `Music|AC/DC` is `Music/AC|DC` in Immich. The reverse undoes it.
-  - Write `TagsList` where it already exists, and where there's a title: Immich's tags hold the title as a tag (F3),
+  - Write `TagsList` where it already exists, and where there's a title or a creator: Immich's tags hold them as tags (F3),
     which Darktable's fields don't, and without `TagsList` Immich reads `HierarchicalSubject`. Also where the image
     file embeds tags Immich would show instead (section 5): a `TagsList`, or any tags when the sidecar has none.
     Otherwise the sidecars Darktable wrote need no change. Not handled: an image whose embedded tags Darktable's
@@ -430,7 +446,7 @@ sidecar when it starts.
 **Sources:** the configured inbox subfolders.
 
 **A unit is ready when** all of these hold:
-- it's tagged `Promote` and has a title, after the merge;
+- it's tagged `Promote` and has a title and a creator, after the merge;
 - it isn't trashed in any copy, and isn't rejected;
 - **it has settled:** every copy agrees with the sidecar, and nothing about the unit changed for the settle time.
 
@@ -440,7 +456,9 @@ sidecar when it starts.
   the old path after the move.
 
 **Without a title,** the unit stays put and gets `Promote/Needs a title`, which is cleared once it's filed, or once
-`Promote` is gone.
+`Promote` is gone. **Without a creator,** the same, with `Promote/Needs a creator` (2026-11-21). A unit has one from
+its source when it arrives (F2), so this is one whose creator was taken off. Filing names the file after the creator,
+so there's no "unknown creator" fallback.
 
 **`Inbox`** (asked for by the author, 2026-11-14): every unit in an inbox source is tagged `Inbox`, and nothing else
 is, so what's still to triage can be found in either tool (Immich's timeline is by date, so filing doesn't move a
@@ -530,7 +548,7 @@ done with it.
 each new copy in every account, and drop the old ones, while the server is in use. So filing moves units only in the
 **filing window**: the hour from `filing.at` (`"HH:MM"`, 04:00 by default), in the server's local time
 (`src/core/filing-window.ts`). A time skipped by a clock change opens it at the first time after. Outside it, a unit
-tagged `Promote` waits, and still gets `Promote/Needs a title` if it has no title. Not limited to the window:
+tagged `Promote` waits, and still gets `Promote/Needs a title` if it has no title (or `Promote/Needs a creator`). Not limited to the window:
 - putting back after a move, since it only waits for Immich;
 - finishing a plan cut short, since a unit half moved is worse than a move at the wrong time;
 - a dry run, which moves nothing, so it shows what it would file at any time.
@@ -542,7 +560,7 @@ nothing else happens then to wake the daemon. So filing is a job of its own, eve
 back, and while the window is open (sooner when a unit is only waiting out the settle time) it reconciles the inbox
 units tagged `Promote`, then files those that are ready (`fileBatch`):
 - **The batch is planned, and the plans recorded** (the `filings` table), before anything moves.
-- **Each unit, in turn:** `Promote` (and `Promote/Needs a title`, and `Inbox`) out of its sidecar, written from the
+- **Each unit, in turn:** `Promote` (and `Promote/Needs a title` or `Promote/Needs a creator`, and `Inbox`) out of its sidecar, written from the
   sidecar as it was when the unit was found ready, so a change since stops the move and the unit is looked at afresh; then every
   file linked at its new name, each checked to be this very file if the name exists; then the old names removed; then
   the unit's sync record moved to the new path, so the next merge has its base and F10 still knows what it made. Then
@@ -891,4 +909,7 @@ left here is keeping them through filing, which makes a new asset:
   daemon's own tag taken off) was never asked to read the sidecar again, since the daemon's write restored the bytes
   it was last asked to read (section 5).
 - 2026-11-19: section 14 (rendering Darktable's edits) planned with the author. Not built.
+- 2026-11-21 (0.4.0): the creator is the tag `Creator/<creator>` in Immich, kept equal to `dc:creator` across the
+  whole archive like the title (F3), since Immich shows no creator. The source's creator is given only on first contact
+  (F2), and filing needs a creator (`Promote/Needs a creator`, section 7).
 - 2026-11-20: section 14 widened to Immich's own edits, which the author decided follow the file. Not built.

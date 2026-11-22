@@ -1,9 +1,10 @@
 // The full pass (DESIGN.md, sections 3 and 13), at start and then daily: it finds every media file in the covered
 // folders, stats each one's sidecar, and returns the units whose sidecar changed since the state's record, or that
 // have no record yet, or whose media file was gone and is back, or whose record has `Inbox` where it shouldn't, or
-// lacks it where it should (so units already recorded get the tag, and lose it if moved by hand). It reads no sidecar: the reconcile does, for the units
-// returned. It also returns the sidecars that belong to no media file (F11), and Syncthing's conflict copies of
-// sidecars, for `handleOrphans`.
+// lacks it where it should (so units already recorded get the tag, and lose it if moved by hand), or whose record has a
+// creator that wasn't yet its tag (so units recorded before 0.4.0 get `Creator/<creator>`, F3). It reads no sidecar:
+// the reconcile does, for the units returned. It also returns the sidecars that belong to no media file (F11), and
+// Syncthing's conflict copies of sidecars, for `handleOrphans`.
 
 import fastGlob from "fast-glob";
 import { statSync } from "node:fs";
@@ -55,7 +56,8 @@ export async function fullPass(store: SyncStore, folders: readonly string[], inb
       const sidecar = stampOf(`${path}.xmp`);
       const same = record !== undefined && record.gone === undefined && (record.sidecar === undefined ? sidecar === undefined : sameStamp(record.sidecar, sidecar));
       const tagged = record !== undefined && record.synced.tags.includes(INBOX_TAG) === inbox(path);
-      if (!same || !tagged) result.changed.push(path);
+      const creatorTagged = record === undefined || record.synced.creator === null || record.synced.creatorTag === true;
+      if (!same || !tagged || !creatorTagged) result.changed.push(path);
     }
   }
   return result;

@@ -3,7 +3,8 @@
 //
 // The sides are Darktable's view of the sidecar and each Immich copy, read through the API. (Immich's view of the
 // sidecar isn't one: it's what some copy wrote, and that copy is a side.) Each value is compared in the same form on
-// every side: tags in Immich's notation with the title as its tag (F3), no rating or an empty description as null.
+// every side: tags in Immich's notation with the title and the creator as their tags (F3), no rating or an empty
+// description as null.
 // - Tags merge tag by tag against the base (F4): an addition or a removal on any side applies. Without a base, it's
 //   the union, which never drops a tag.
 // - The rating, description, date and GPS go to the latest change (F7): of the sides that differ from the base, the
@@ -14,11 +15,11 @@
 //   Immich doesn't know, F1), or can't show what it says (a reject, -1, which Immich reads as unrated), keeps saying
 //   the same, and so never undoes anything.
 // - Trash (F8): a trash or a restore on a copy that isn't offline goes to every copy.
-// - Two titles are a conflict (F3): the unit is left as it is, and reported.
+// - Two titles, or two creators, are a conflict (F3): the unit is left as it is, and reported.
 
 import { sameDate } from "./xmp.ts";
 import { mergeTags } from "./tags.ts";
-import { titleProblem, titlesIn, withTitle } from "./titles.ts";
+import { CREATOR, type FieldTag, TITLE, creatorProblem, titleProblem } from "./titles.ts";
 
 export interface Gps {
   latitude: number;
@@ -29,7 +30,7 @@ export interface Gps {
 export interface SideValues {
   rating?: number | null;
   description?: string | null;
-  /** Immich's notation, with the title as `Title/<title>`, without Darktable's own tags. */
+  /** Immich's notation, with the title as `Title/<title>` and the creator as `Creator/<creator>`, without Darktable's own tags. */
   tags?: string[];
   date?: string | null;
   gps?: Gps | null;
@@ -60,8 +61,18 @@ export interface Base {
   trashed: boolean;
 }
 
+/**
+ * The values held beside the base's tags, as they were at the last sync: the title, and the creator. A creator that
+ * wasn't a tag then (before 0.4.0, when Immich's copies didn't show it) is left out: undefined.
+ */
+export interface Held {
+  title?: string | null;
+  creator?: string | null;
+}
+
 export interface Merged extends Base {
   title: string | null;
+  creator: string | null;
   /** Which side each changed value came from, for logs. */
   from: Partial<Record<keyof Base, string>>;
 }
@@ -105,16 +116,30 @@ function latest<T>(field: keyof Base, base: T | undefined, sides: Side[], read: 
   return winner.value;
 }
 
-export function mergeUnit(base: Base | undefined, title: string | null | undefined, sides: Side[]): MergeResult {
+/** The base's tags as Immich shows them: with the title's and the creator's tags. */
+function heldTags(base: Base, held: Held | undefined): string[] {
+  return CREATOR.with(TITLE.with(base.tags, held?.title ?? undefined), held?.creator ?? undefined);
+}
+
+/** A field's one value in the merged tags, null for none, or a conflict. */
+function fieldValue(tags: readonly string[], field: FieldTag, noun: string, problemOf: (value: string) => string | undefined): { value: string | null } | { conflict: string } {
+  const values = field.valuesIn(tags);
+  if (values.length > 1) return { conflict: `it has two ${noun}s: ${values.map((text) => JSON.stringify(text)).join(" and ")}` };
+  const problem = values[0] !== undefined ? problemOf(values[0]) : undefined;
+  if (problem) return { conflict: `its ${noun} ${JSON.stringify(values[0])} can't be used: ${problem}` };
+  return { value: values[0] ?? null };
+}
+
+export function mergeUnit(base: Base | undefined, held: Held | undefined, sides: Side[]): MergeResult {
   const from: Merged["from"] = {};
 
   const tagSides = sides.flatMap((side) => (side.values.tags ? [{ tags: side.values.tags, last: side.last?.tags }] : []));
-  const tags = mergeTags(base && withTitle(base.tags, title ?? undefined), tagSides);
-  const titles = titlesIn(tags);
-  if (titles.length > 1) return { conflict: `it has two titles: ${titles.map((text) => JSON.stringify(text)).join(" and ")}` };
-  const problem = titles[0] !== undefined ? titleProblem(titles[0]) : undefined;
-  if (problem) return { conflict: `its title ${JSON.stringify(titles[0])} can't be used: ${problem}` };
-  if (!base || tags.join("\n") !== withTitle(base.tags, title ?? undefined).toSorted().join("\n")) from.tags = "merge";
+  const tags = mergeTags(base && heldTags(base, held), tagSides);
+  const title = fieldValue(tags, TITLE, "title", titleProblem);
+  if ("conflict" in title) return title;
+  const creator = fieldValue(tags, CREATOR, "creator", creatorProblem);
+  if ("conflict" in creator) return creator;
+  if (!base || tags.join("\n") !== heldTags(base, held).toSorted().join("\n")) from.tags = "merge";
 
   const rating = latest("rating", base?.rating, sides, (values) => (values.rating === undefined ? undefined : normalizeRating(values.rating)), (a, b) => a === b, from) ?? null;
   const description =
@@ -126,5 +151,6 @@ export function mergeUnit(base: Base | undefined, title: string | null | undefin
   const copies = sides.filter((side) => side.values.trashed !== undefined && !side.values.offline);
   const trashed = latest("trashed", base?.trashed ?? false, copies, (values) => values.trashed, (a, b) => a === b, from) ?? false;
 
-  return { merged: { rating, description, tags: withTitle(tags, undefined).sort(), title: titles[0] ?? null, date, gps, trashed, from } };
+  const others = CREATOR.with(TITLE.with(tags, undefined), undefined).sort();
+  return { merged: { rating, description, tags: others, title: title.value, creator: creator.value, date, gps, trashed, from } };
 }

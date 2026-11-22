@@ -185,7 +185,7 @@ describe("sameDate", () => {
 
 describe("planWrite", () => {
   test("nothing to write when everything already says what's wanted", () => {
-    const fields = { ...parseXmp(darktableRaw), tagsList: ["Places/Lake", "Title/1.50"] };
+    const fields = { ...parseXmp(darktableRaw), tagsList: ["Places/Lake", "Title/1.50", "Creator/Alex Example"] };
     expect(
       planWrite(fields, {
         rating: 3,
@@ -215,24 +215,35 @@ describe("planWrite", () => {
     expect(planWrite({ ...immichFields, description: "New" }, { description: "New" })).toEqual({ [TAGS.immichDescription]: "New" });
   });
 
-  test("tags go to Darktable's fields, and to TagsList where it exists or there's a title; Darktable's own tags stay", () => {
-    const { title: _, ...untitled } = parseXmp(darktableRaw);
+  test("tags go to Darktable's fields, and to TagsList where it exists or there's a title or a creator; Darktable's own tags stay", () => {
+    const { title: _, creator: __, ...untitled } = parseXmp(darktableRaw);
     expect(planWrite(untitled, { tags: ["Places/Lake", "People/Robin Example"] })).toEqual({
       [TAGS.hierarchicalSubject]: ["darktable|format|jpg", "Places|Lake", "People|Robin Example"],
       [TAGS.subject]: ["darktable", "format", "jpg", "Places", "Lake", "People", "Robin Example"],
     });
-    // With a title, Immich needs TagsList to see it as a tag.
-    expect(planWrite(parseXmp(darktableRaw), { tags: ["Places/Lake"] })).toEqual({ [TAGS.tagsList]: ["Places/Lake", "Title/1.50"] });
+    // With a title or a creator, Immich needs TagsList to see them as tags.
+    expect(planWrite(parseXmp(darktableRaw), { tags: ["Places/Lake"] })).toEqual({ [TAGS.tagsList]: ["Places/Lake", "Title/1.50", "Creator/Alex Example"] });
+    const { title: ___, ...creatorOnly } = parseXmp(darktableRaw);
+    expect(planWrite(creatorOnly, { tags: ["Places/Lake"] })).toEqual({ [TAGS.tagsList]: ["Places/Lake", "Creator/Alex Example"] });
     expect(planWrite(immichFields, { tags: ["Music/AC|DC"] })).toEqual({
       [TAGS.hierarchicalSubject]: ["darktable|format|jpg", "Music|AC/DC"],
       [TAGS.subject]: ["darktable", "format", "jpg", "Music", "AC/DC"],
-      [TAGS.tagsList]: ["darktable/format/jpg", "Music/AC|DC"],
+      [TAGS.tagsList]: ["darktable/format/jpg", "Music/AC|DC", "Creator/Alex Example"],
     });
   });
 
   test("TagsList is also written where Immich would otherwise show the image's tags", () => {
-    const { title: _, ...untitled } = parseXmp(darktableRaw);
+    const { title: _, creator: __, ...untitled } = parseXmp(darktableRaw);
     expect(planWrite(untitled, { tags: ["Places/Lake"], tagsList: true })).toEqual({ [TAGS.tagsList]: ["Places/Lake"] });
+  });
+
+  test("a creator changed or removed changes dc:creator and its tag in TagsList", () => {
+    const fields = { ...parseXmp(darktableRaw), tagsList: ["Places/Lake", "Title/1.50", "Creator/Alex Example"] };
+    expect(planWrite(fields, { tags: ["Places/Lake"], creator: "Sam Example" })).toEqual({
+      [TAGS.creator]: ["Sam Example"],
+      [TAGS.tagsList]: ["Places/Lake", "Title/1.50", "Creator/Sam Example"],
+    });
+    expect(planWrite(fields, { tags: ["Places/Lake"], creator: null })).toEqual({ [TAGS.creator]: null, [TAGS.tagsList]: ["Places/Lake", "Title/1.50"] });
   });
 
   test("removing every tag removes the fields that would be empty", () => {

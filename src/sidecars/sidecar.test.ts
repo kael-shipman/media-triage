@@ -119,7 +119,7 @@ describe("writing", () => {
 
     const after = (await readSidecar(exiftool, path))!;
     expect(darktableReads(after.fields)).toEqual({ ...darktableReads(sidecar.fields), rating: 5, tags: ["Places/Lake", "Music/AC|DC"] });
-    expect(immichReads(after.fields).tags).toEqual(["Places/Lake", "Music/AC|DC", "Title/Lake day"]);
+    expect(immichReads(after.fields).tags).toEqual(["Places/Lake", "Music/AC|DC", "Title/Lake day", "Creator/Alex Example"]);
     expect(after.fields.hierarchicalSubject).toContain("darktable|format|jpg");
     expect(after.fields.toolkit).toMatch(/ExifTool/);
     // Darktable's own fields are untouched, the permissions kept, and there's no backup beside it.

@@ -16,10 +16,10 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Config } from "../config.ts";
 import { type FacesOutcome, type NamedFace, applyFaces } from "../core/faces.ts";
-import { readiness, withInbox, withNeedsTitle } from "../core/filing.ts";
+import { readiness, withInbox, withNeeds } from "../core/filing.ts";
 import { type Base, type Side, type SideValues, mergeUnit, normalizeDescription, normalizeRating } from "../core/merge.ts";
 import { isDarktableInternalInImmich, sameTags } from "../core/tags.ts";
-import { withTitle } from "../core/titles.ts";
+import { CREATOR, TITLE } from "../core/titles.ts";
 import { PROMOTE_TAG } from "../core/naming.ts";
 import { type AccountState, type ImageFacts, type Wanted, type XmpFields, darktableReads, dateFromImmich, hasDate, imageTags, immichReads, immichReadsImageTags, offsetFromImmich, sameDate } from "../core/xmp.ts";
 import { type Asset, getAsset, refreshMetadata, restoreAssets, trashAssets } from "../immich/assets.ts";
@@ -86,7 +86,7 @@ export interface ReadyUnit {
   unit: string;
   sidecar: Sidecar;
   title: string;
-  creator: string | null;
+  creator: string;
   /** The capture time as the merge has it, or null: filing then goes by Immich's. */
   date: string | null;
   copies: { account: string; asset: Asset }[];
@@ -114,13 +114,13 @@ export function copyValues(asset: Asset): SideValues {
   };
 }
 
-/** What Darktable shows from a sidecar, in the form the merge compares. */
+/** What Darktable shows from a sidecar, in the form the merge compares: its title and creators as their tags (F3). */
 export function darktableValues(fields: XmpFields): SideValues {
   const view = darktableReads(fields);
   return {
     rating: normalizeRating(fields.rating),
     description: normalizeDescription(fields.description),
-    tags: withTitle(view.tags, fields.title),
+    tags: [...CREATOR.with(TITLE.with(view.tags, fields.title), undefined), ...(fields.creator ?? []).map(CREATOR.tag)],
     date: fields.date ?? fields.immichDate ?? null,
     gps: fields.latitude !== undefined && fields.longitude !== undefined ? { latitude: fields.latitude, longitude: fields.longitude } : null,
   };
@@ -298,7 +298,13 @@ export async function reconcile(ctx: ReconcileContext, units: readonly string[])
       first: report.unread[0],
     });
   }
-  if (ctx.dryRun) for (const { unit, fields } of report.written.slice(0, 20)) log.info("would write", { unit, fields: fields.join(",") });
+  if (ctx.dryRun) {
+    for (const { unit, fields } of report.written.slice(0, 20)) log.info("would write", { unit, fields: fields.join(",") });
+    // How many sidecars each field would be written in, so a large first run can be checked by its shape.
+    const byField = new Map<string, number>();
+    for (const { fields } of report.written) for (const field of fields) byField.set(field, (byField.get(field) ?? 0) + 1);
+    if (byField.size > 0) log.info("would write, by field", Object.fromEntries([...byField].sort(([a], [b]) => a.localeCompare(b))));
+  }
   return report;
 }
 
@@ -401,11 +407,18 @@ async function reconcileUnit(
       ...(last ? { last } : {}),
     };
   });
-  if (fields) sides.unshift({ name: "darktable", at: sidecar?.stamp.mtimeMs ?? 0, sidecar: true, values: darktableValues(fields) });
+  if (fields) {
+    const values = darktableValues(fields);
+    // F2: on first contact, a unit in an inbox source without a creator gets the source's. Later, it's the merge's like
+    // any other value: a creator taken off stays off, and filing asks for one (section 7).
+    if (source && !base && !fields.creator?.length) values.tags = [...values.tags!, CREATOR.tag(source.creator)];
+    sides.unshift({ name: "darktable", at: sidecar?.stamp.mtimeMs ?? 0, sidecar: true, values });
+  }
   if (sides.length === 0) return;
 
   // 2. Merge.
-  const result = mergeUnit(base, previous?.synced.title, sides);
+  const kept = { title: previous?.synced.title, ...(previous?.synced.creatorTag ? { creator: previous.synced.creator } : {}) };
+  const result = mergeUnit(base, kept, sides);
   if ("conflict" in result) {
     report.conflicts.push({ unit, problem: result.conflict });
     return;
@@ -433,15 +446,15 @@ async function reconcileUnit(
     });
     merged.tags = faces.tags;
   }
-  // Section 7: an inbox unit is tagged Inbox until it's filed, and one tagged Promote without a title says so, in both
-  // tools.
-  merged.tags = withInbox(source ? withNeedsTitle(merged.tags, merged.title) : merged.tags, source !== undefined);
+  // Section 7: an inbox unit is tagged Inbox until it's filed, and one tagged Promote without a title or a creator says
+  // so, in both tools.
+  merged.tags = withInbox(source ? withNeeds(merged.tags, merged) : merged.tags, source !== undefined);
 
   // 3. Write the sidecar's changed fields, if the file is still as it was read.
   let stamp = sidecar?.stamp;
   let written = false;
   if (fields) {
-    const wanted: Wanted = { tags: merged.tags, title: merged.title };
+    const wanted: Wanted = { tags: merged.tags, title: merged.title, creator: merged.creator };
     if (image && immichReadsImageTags(fields, image)) wanted.tagsList = true;
     if (normalizeRating(fields.rating) !== merged.rating) wanted.rating = merged.rating;
     if (normalizeDescription(fields.description) !== merged.description) wanted.description = merged.description;
@@ -450,7 +463,6 @@ async function reconcileUnit(
       wanted.offset = copies.map((copy) => offsetFromImmich({ ...copy.asset, timeZone: copy.asset.exifInfo?.timeZone })).find((offset) => offset !== undefined);
     }
     if (merged.gps !== null) wanted.gps = merged.gps;
-    if (source && !fields.creator?.length) wanted.creator = source.creator;
     if (!held) wanted.accounts = accountStates(store, records, new Map(copies.map((copy) => [copy.asset.id, copy.asset])), fields.accounts ?? []);
     if (faces?.regions) wanted.regions = faces.regions;
     if (sidecar) {
@@ -511,7 +523,7 @@ async function reconcileUnit(
     const { from: _, ...values } = merged;
     const synced: SyncedValues = {
       ...values,
-      creator: fields?.creator?.[0] ?? null,
+      creatorTag: true,
       people: faces?.madeTags ?? previous?.synced.people ?? [],
       regions: faces?.madeRegions ?? previous?.synced.regions ?? [],
       copies: copies.map((copy) => copy.asset.id),
@@ -531,6 +543,7 @@ async function reconcileUnit(
     const state = readiness({
       tags: merged.tags,
       title: merged.title,
+      creator: merged.creator,
       rating: fields.rating,
       copies: copies.map((copy) => ({
         trashed: copy.asset.isTrashed,
@@ -549,7 +562,7 @@ async function reconcileUnit(
         unit,
         sidecar: current,
         title: merged.title!,
-        creator: fields.creator?.[0] ?? null,
+        creator: merged.creator!,
         date: merged.date,
         copies: copies.map((copy) => ({ account: copy.record.account, asset: copy.asset })),
       });

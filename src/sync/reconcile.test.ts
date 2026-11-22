@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from "bun:te
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { FIXTURES, USERS, api, configFor, describeImmich, login, mediaFolder, newUser, waitFor } from "../../test/immich/harness.ts";
+import { FIXTURES, USERS, api, configFor, describeImmich, immichIdle, login, mediaFolder, newUser, waitFor } from "../../test/immich/harness.ts";
 import { PathMap } from "../core/path-map.ts";
 import { type AccountState, type XmpFields, darktableReads } from "../core/xmp.ts";
 import { fileBatch } from "../filing/file.ts";
@@ -313,6 +313,51 @@ describeImmich("reconciling a unit with two accounts' copies", () => {
     const untitled = await reconcile(ctx, [unit]);
     expect(untitled.notReady).toEqual([{ unit, why: "it has no title" }]);
     expect((await readSidecar(exiftool, `${unit}.xmp`))!.fields.hierarchicalSubject).toContain("Promote|Needs a title");
+  }, 180_000);
+
+  test("the creator is the tag Creator/<creator> in Immich: changed there, it's filed by; taken off, filing asks for one", async () => {
+    const { admin, unit, ctx, copy, settled, token } = await twoAccounts("creator", { inbox: true });
+    const tagsOf = (asset: Asset) => (asset.tags ?? []).map((tag) => tag.value).sort();
+    const fieldsOf = async () => (await readSidecar(exiftool, `${unit}.xmp`))!.fields;
+    await reconcile(ctx, [unit]);
+    // Darktable's creator, as a tag in Immich's TagsList only: Darktable's own tags don't get it.
+    expect((await fieldsOf()).tagsList).toContain("Creator/Alex Example");
+    expect((await fieldsOf()).hierarchicalSubject).not.toContain("Creator|Alex Example");
+    await settled("the creator's tag on both copies", (a, b) => tagsOf(a).includes("Creator/Alex Example") && tagsOf(b).includes("Creator/Alex Example"));
+    // The copies' reads, as their stream events would have the daemon do: each is compared with what it said then.
+    // And nothing still queued that would read the sidecar again between the two edits below, and undo the first.
+    await reconcile(ctx, [unit]);
+    await immichIdle(admin.accessToken);
+
+    // Changed in account one's Immich: one tag off, another on. Darktable's creator follows, and so does filing.
+    const oneToken = await token("one");
+    const upserted = await api<{ id: string; value: string }[]>("PUT", "/tags", { token: oneToken, body: { tags: ["Creator/Alex Example", "Creator/Sam Example"] } });
+    const [alex, sam] = ["Creator/Alex Example", "Creator/Sam Example"].map((value) => upserted.find((tag) => tag.value === value));
+    // Two edits, as a person makes them: Immich re-reads the sidecar after each write (and unlocks the field), so a
+    // second edit made before the first one's write has settled can be undone by Immich itself.
+    await api("PUT", `/tags/${sam!.id}/assets`, { token: oneToken, body: { ids: [copy("one").id] } });
+    await waitFor("Immich's sidecar with both creators' tags", async () => ((await fieldsOf()).tagsList?.includes("Creator/Sam Example") ? true : undefined));
+    await immichIdle(admin.accessToken);
+    await api("DELETE", `/tags/${alex!.id}/assets`, { token: oneToken, body: { ids: [copy("one").id] } });
+    await waitFor("Immich's sidecar with the new creator's tag", async () => ((await fieldsOf()).tagsList?.includes("Creator/Sam Example") && !(await fieldsOf()).tagsList?.includes("Creator/Alex Example") ? true : undefined));
+    await writeSidecar(exiftool, (await readSidecar(exiftool, `${unit}.xmp`))!, { tags: [...darktableReads(await fieldsOf()).tags, "Promote"] });
+    await waitFor("ready, by the new creator", async () => {
+      const report = await reconcile(ctx, [unit]);
+      return report.ready[0]?.creator === "Sam Example" ? true : undefined;
+    }, 60_000);
+    expect((await fieldsOf()).creator).toEqual(["Sam Example"]);
+    await settled("the new creator's tag on both copies", (a, b) => tagsOf(a).includes("Creator/Sam Example") && !tagsOf(b).includes("Creator/Alex Example"));
+    await reconcile(ctx, [unit]);
+    await immichIdle(admin.accessToken);
+
+    // Taken off: it doesn't come back from the source (F2 is for first contact), and filing asks for one.
+    await api("DELETE", `/tags/${sam!.id}/assets`, { token: oneToken, body: { ids: [copy("one").id] } });
+    await waitFor("Immich's sidecar without a creator's tag", async () => ((await fieldsOf()).tagsList?.some((tag) => tag.startsWith("Creator/")) === false ? true : undefined));
+    const report = await reconcile(ctx, [unit]);
+    expect(report.notReady).toEqual([{ unit, why: "it has no creator" }]);
+    const fields = await fieldsOf();
+    expect(fields.creator).toBeUndefined();
+    expect(fields.hierarchicalSubject).toContain("Promote|Needs a creator");
   }, 180_000);
 
   test("an inbox unit is tagged Inbox in both tools, and taken off in Immich, it comes back", async () => {

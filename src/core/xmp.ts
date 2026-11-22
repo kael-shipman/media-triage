@@ -9,12 +9,12 @@
 //   reads the first and keeps the second, but has no time zones: it drops a date's offset when it reads one, and
 //   writes dates without. So the second holds the capture time with its offset (see `planWrite`);
 // - the tags: Darktable's `lr:hierarchicalSubject` and `dc:subject`, and Immich's `digiKam:TagsList`, which also
-//   holds the title as a tag (F3).
+//   holds the title and the creator as tags (F3).
 // Immich's copies are written where they already exist, and where they're needed to hold what Darktable's fields
-// can't: a date's offset, a title tag, or tags over those the image file embeds.
+// can't: a date's offset, a title or creator tag, or tags over those the image file embeds.
 
 import { type RegionInfo } from "./regions.ts";
-import { titleTag } from "./titles.ts";
+import { CREATOR, TITLE } from "./titles.ts";
 import { dcSubject, isDarktableInternal, isDarktableInternalInImmich, sameTags, toDarktable, toImmich } from "./tags.ts";
 import { parseWallTime } from "./naming.ts";
 
@@ -153,8 +153,8 @@ export interface ToolView {
 /**
  * What Immich 3.3 reads from the sidecar (`metadata.service.ts`): `TagsList`, or `HierarchicalSubject` without it
  * (`getTagList`); `ImageDescription` before `Description`; the MWG date, which in a sidecar is
- * `photoshop:DateCreated` before `exif:DateTimeOriginal`; a rating of 1 to 5, and none otherwise. Titles it doesn't
- * read: the title is the tag `Title/<title>` (F3).
+ * `photoshop:DateCreated` before `exif:DateTimeOriginal`; a rating of 1 to 5, and none otherwise. Titles and creators
+ * it doesn't read: they're the tags `Title/<title>` and `Creator/<creator>` (F3).
  */
 export function immichReads(fields: XmpFields): ToolView {
   const tags = fields.tagsList ?? fields.hierarchicalSubject?.map(toImmich) ?? [];
@@ -374,12 +374,13 @@ export function planWrite(fields: XmpFields, wanted: Wanted): Assignments {
     const hierarchical = [...(fields.hierarchicalSubject ?? []).filter(isDarktableInternal), ...wanted.tags.map(toDarktable)];
     setList(plan, TAGS.hierarchicalSubject, hierarchical, fields.hierarchicalSubject);
     setList(plan, TAGS.subject, dcSubject(hierarchical), fields.subject);
-    // Immich's tags hold the title as a tag (F3), which Darktable's fields don't. So `TagsList` is written where it
-    // exists, and also where there's a title: without it, Immich would read Darktable's fields, and miss the title.
-    // And where the image file embeds tags Immich would show instead of Darktable's fields.
+    // Immich's tags hold the title and the creator as tags (F3), which Darktable's fields don't. So `TagsList` is
+    // written where it exists, and also where there's a title or a creator: without it, Immich would read Darktable's
+    // fields, and miss them. And where the image file embeds tags Immich would show instead of Darktable's fields.
     const title = wanted.title !== undefined ? wanted.title : (fields.title ?? null);
-    if (fields.tagsList !== undefined || title !== null || wanted.tagsList) {
-      const immich = [...(fields.tagsList ?? []).filter(isDarktableInternalInImmich), ...wanted.tags, ...(title !== null ? [titleTag(title)] : [])];
+    const creators = wanted.creator !== undefined ? (wanted.creator === null ? [] : [wanted.creator]) : (fields.creator ?? []);
+    if (fields.tagsList !== undefined || title !== null || creators.length > 0 || wanted.tagsList) {
+      const immich = [...(fields.tagsList ?? []).filter(isDarktableInternalInImmich), ...wanted.tags, ...(title !== null ? [TITLE.tag(title)] : []), ...creators.map(CREATOR.tag)];
       setList(plan, TAGS.tagsList, immich, fields.tagsList);
     }
   }

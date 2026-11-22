@@ -1,11 +1,14 @@
 import { expect, test } from "bun:test";
-import { type CopyState, type ReadinessInput, readiness, withInbox, withNeedsTitle } from "./filing.ts";
+import { type CopyState, type ReadinessInput, readiness, withInbox, withNeeds } from "./filing.ts";
 
-test("Promote without a title needs one; the daemon's tag goes once there's a title, or no Promote", () => {
-  expect(withNeedsTitle(["Promote", "Places/Lake"], null)).toEqual(["Places/Lake", "Promote", "Promote/Needs a title"]);
-  expect(withNeedsTitle(["Promote", "Promote/Needs a title"], "Lake day")).toEqual(["Promote"]);
-  expect(withNeedsTitle(["Promote/Needs a title"], null)).toEqual([]);
-  expect(withNeedsTitle(["Places/Lake"], null)).toEqual(["Places/Lake"]);
+test("Promote without a title or a creator needs one; the daemon's tags go once there's the value, or no Promote", () => {
+  const both = { title: "Lake day", creator: "Alex Example" };
+  expect(withNeeds(["Promote", "Places/Lake"], { ...both, title: null })).toEqual(["Places/Lake", "Promote", "Promote/Needs a title"]);
+  expect(withNeeds(["Promote", "Places/Lake"], { ...both, creator: null })).toEqual(["Places/Lake", "Promote", "Promote/Needs a creator"]);
+  expect(withNeeds(["Promote"], { title: null, creator: null })).toEqual(["Promote", "Promote/Needs a creator", "Promote/Needs a title"]);
+  expect(withNeeds(["Promote", "Promote/Needs a creator", "Promote/Needs a title"], both)).toEqual(["Promote"]);
+  expect(withNeeds(["Promote/Needs a creator", "Promote/Needs a title"], { title: null, creator: null })).toEqual([]);
+  expect(withNeeds(["Places/Lake"], { title: null, creator: null })).toEqual(["Places/Lake"]);
 });
 
 test("an inbox unit is tagged Inbox, and nothing else is", () => {
@@ -21,6 +24,7 @@ const copy = (changes: Partial<CopyState> = {}): CopyState => ({ trashed: false,
 const ready: ReadinessInput = {
   tags: ["Promote", "Places/Lake"],
   title: "Lake day",
+  creator: "Alex Example",
   rating: 3,
   copies: [copy(), copy()],
   unreadable: 0,
@@ -29,7 +33,7 @@ const ready: ReadinessInput = {
   now,
 };
 
-test("ready: Promote, a title, nothing trashed or rejected, every copy in step, and quiet for the settle time", () => {
+test("ready: Promote, a title and a creator, nothing trashed or rejected, every copy in step, and quiet for the settle time", () => {
   expect(readiness(ready)).toEqual({ ready: true });
   expect(readiness({ ...ready, copies: [] })).toEqual({ ready: true });
 });
@@ -37,6 +41,7 @@ test("ready: Promote, a title, nothing trashed or rejected, every copy in step, 
 test.each<[string, Partial<ReadinessInput>, string]>([
   ["no Promote", { tags: ["Places/Lake"] }, "it isn't tagged Promote"],
   ["no title", { title: null }, "it has no title"],
+  ["no creator", { creator: null }, "it has no creator"],
   ["rejected", { rating: -1 }, "it's rejected"],
   ["a copy trashed", { copies: [copy(), copy({ trashed: true })] }, "a copy is in the trash"],
   ["an account not open", { unreadable: 1 }, "a copy's account isn't open, so its state can't be read"],
