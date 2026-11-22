@@ -16,6 +16,8 @@ One long-running program. It's started with an inbox folder and an archive folde
 - deletes sidecars whose photo is gone (section 6);
 - keeps the Immich accounts set up: libraries and exclusion patterns, a privacy check, the cluster group, and shared
   people and names (section 8);
+- **planned:** renders photos with Darktable edits, for Immich to show as their edited version, and keeps Immich's
+  own edits through filing (section 14);
 - upgrades itself (section 11).
 
 **The whole archive, not just the inbox:** someone can tag, rate, title or name a face on a photo filed years ago, in
@@ -54,6 +56,7 @@ with `--config` or `MEDIA_TRIAGE_CONFIG`. [examples/config.toml](../examples/con
 | `[filing]` | Where filed photos and videos go in the archive, and when filing moves them each day (`at`, 04:00, section 7) |
 | `[timing]` | Settle time before filing (5 min), orphan grace period (1 h), full pass (24 h) |
 | `[upgrade]` | Automatic upgrades (section 11) |
+| `[render]` | **Planned:** rendering Darktable's edits (section 14) |
 
 **The state folder** defaults to `$XDG_STATE_HOME/media-triage` (`~/.local/state/media-triage`). It holds the SQLite
 database, the Immich sessions and the logs. **Never put it inside a synced folder.**
@@ -793,6 +796,53 @@ with what changed, not with the size of the archive.
 - **The first run is the heaviest:** it reads every sidecar once, and streams every asset once per account. Run it with
   `--dry-run` first, which shows what it would do, with counts.
 
+## 14. Edits (planned)
+
+**Not built yet.** Planned with the author on 2026-11-19 and 2026-11-20.
+
+**Edits belong to the file, not to an account:** every account that indexes a file sees the same edits, whether they
+were made in Darktable or in Immich's own editor, and filing keeps them.
+
+### Darktable's renders
+
+Darktable keeps its edits as instructions in the sidecar, and Immich can't render them. This module renders each photo
+that has Darktable edits, and Immich shows the render as the photo's **edited version**: the second set of thumbnail,
+preview and full-size image it keeps for its own crop, rotate and mirror, which its web and phone apps show by
+default. A render is never an asset of its own. Making the edited version from a render takes a patch in the author's
+Immich fork (`IMMICH_EXTERNAL_RENDERS`); without it, renders are made but Immich doesn't show them.
+
+- **Off unless configured** (`[render]`): the render folder, the `darktable-cli` command, and the size (2560 px on
+  the long edge by default). `darktable-cli` is needed only when rendering is on.
+- **What counts as edited:** `darktable:history_current_hash` differs from both `history_auto_hash` and
+  `history_basic_hash`. Sidecars from Darktable versions that wrote no history hashes count as edited when their
+  history, up to `history_end`, holds a module Darktable doesn't apply on its own. Both XMP encodings occur:
+  attributes, as Darktable writes them, and elements, as exiftool does.
+- **State:** each unit records what its render was made from (the hash, or a hash of the history), so an unchanged
+  photo is never rendered again.
+- **Rendering:** `darktable-cli <photo> <sidecar> <temporary file> --width N --height N --core --configdir
+  <scratch>`, into the render folder at the original's path as Immich sees it (through `path_map`), then renamed into
+  place, so Immich never reads half a render. One at a time, behind sync and filing. Renders can always be made
+  again, so the folder is never synced or backed up.
+- **Removal:** a render goes when the photo's edits are reset, or when the photo is gone.
+- **Filing** (section 7) moves a unit's render with it, before the photo, so Immich's new copies find it on their first
+  thumbnail job.
+- **Immich:** after any change, every copy of the photo is regenerated (`POST /api/assets/jobs`,
+  `regenerate-thumbnail`, batched), since each copy has its own edited files. A copy that appears later finds the
+  render by itself.
+- **Every copy shows the same render.** On a photo with a render, Immich's own edits are ignored (the fork's patch),
+  but still kept as below, and apply if the render goes.
+
+### Immich's own edits
+
+Immich keeps its edits (crop, rotate, mirror) per asset, in its database. The author's fork mirrors an edit made on one
+copy of a file to every other copy, whoever owns it (with `IMMICH_SHARE_DERIVED_DATA`, like face corrections). What's
+left here is keeping them through filing, which makes a new asset:
+- **Recorded in the sidecar,** in the daemon's namespace (F9), once per file rather than per account, from each
+  account's sync stream (`AssetEditV1`, `AssetEditDeleteV1`).
+- **Put back after filing** (section 7) with `PUT /api/assets/{id}/edits` on one new copy; the fork mirrors them to the
+  others. A flag derived from the fork's switch (like `mirrors_face_corrections`) says so; without it, they're put back
+  on every new copy.
+
 ## History
 
 - 2026-11-03: written, from the plan made for the author's own setup.
@@ -840,3 +890,5 @@ with what changed, not with the size of the archive.
   by date, so filing didn't show what was left to triage. Found building it: a copy whose edit the merge undid (the
   daemon's own tag taken off) was never asked to read the sidecar again, since the daemon's write restored the bytes
   it was last asked to read (section 5).
+- 2026-11-19: section 14 (rendering Darktable's edits) planned with the author. Not built.
+- 2026-11-20: section 14 widened to Immich's own edits, which the author decided follow the file. Not built.

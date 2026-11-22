@@ -8,7 +8,8 @@ you're about to build would change it, ask the author first.
 session stops partway. Each step ends with tests passing, the type check clean, a commit and a push; CI must stay
 green.
 
-**Last updated:** 2026-11-14 (`v0.3.0`: the `Inbox` tag, "The Inbox tag" below). `v0.2.0` (2026-11-11): filing
+**Last updated:** 2026-11-20 (milestones 9 and 10, edits, planned: DESIGN.md section 14; not started).
+2026-11-14: `v0.3.0`, the `Inbox` tag, "The Inbox tag" below. `v0.2.0` (2026-11-11): filing
 only in a daily window, "Filing at night" below. **All 8 milestones are done** (the last,
 filing, on 2026-11-05), and the first run over a real archive was checked and four ways it could lose data were fixed
 ("Checked before the first real run", below). `v0.1.0` was installed on the author's server and dry-run over their
@@ -488,6 +489,22 @@ full pass, the sync stream consumer, the reconcile loop, F1–F8 (F5 dropped), t
 **7. F9–F11**, done 2026-11-04: Immich-only state, named faces, orphan sidecars.
 
 **8. Filing**, done 2026-11-05: section 7, with putting the per-account state back, and the daemon's smoke test.
+
+**9. Rendering Darktable's edits** (section 14), planned 2026-11-19, not started. Immich shows the renders only with
+the author's fork patch (`IMMICH_EXTERNAL_RENDERS`), built separately; check on the target server that its
+`darktable-cli` is at least as new as the Darktable that wrote the edits.
+1. [ ] `[render]` configuration, off by default; `darktable-cli` found and its version logged.
+2. [ ] Detection (both rules, both XMP encodings), checked against Darktable's "altered" filter, and the state.
+3. [ ] Rendering: the queue, the temporary file and rename, removal.
+4. [ ] Filing moves renders, before the photo.
+5. [ ] Regenerating every copy in Immich, batched.
+6. [ ] Tests, and an end-to-end check against a development Immich running the fork's patch.
+
+**10. Immich's own edits through filing** (section 14), planned 2026-11-20, not started. Needs the fork to mirror edits
+between copies (built separately).
+1. [ ] Edits from the sync stream, recorded in the namespace, per file.
+2. [ ] Put back after filing, on one new copy, or every copy without the fork's mirroring.
+3. [ ] Tests, and an end-to-end check against a development Immich running the fork.
 
 ## Rules
 
