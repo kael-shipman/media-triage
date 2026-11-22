@@ -281,6 +281,12 @@ readiness, `planWrite` (a creator alone writes `TagsList`; a change or removal),
 change in Immich reaches Darktable and filing, and one taken off isn't put back. All 498 tests passed twice in a row against the development Immich, and the
 smoke test (27 of 27).
 
+**On the author's server** (2026-11-21): dry-run over a copy of the state first (a dry run acknowledges nothing, so it
+can run beside the live daemon on a copy), then installed. 15,402 units: 15,392 sidecars get `TagsList` only, no
+`dc:creator` changes at all, and the only conflicts were 9 that predate it (a title holding a `/`). The 12 changes to
+Darktable's tag fields were tags `Creator/…` made by hand in Immich before 0.4.0, which 0.3.0 had copied into
+Darktable's tags, and which are now the creator instead.
+
 ## Next: running it for real
 
 The code is done. What's left is outside this repository. Every write to real files needs the author; the F1
