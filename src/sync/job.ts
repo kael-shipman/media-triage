@@ -55,6 +55,10 @@ export class Sync {
   private windowOpen: boolean | undefined;
   /** What units being put back were last logged as waiting for. */
   private restoreWaits = new Map<string, string>();
+  /** Put-back units Immich failed on, with its error, so each is logged when it first appears. */
+  private restoreFailures = new Map<string, string>();
+  /** Promoted units waiting to be filed, with why, so each is logged when it first appears. */
+  private filingWaits = new Map<string, string>();
   /** Copies catching up after a refresh (src/sync/reconcile.ts). */
   private readonly refreshing = new Map<string, Refreshing>();
 
@@ -176,6 +180,9 @@ export class Sync {
     const waiting = new Map(restored.waiting.map(({ unit, why }) => [unit, why]));
     for (const [unit, why] of waiting) if (this.restoreWaits.get(unit) !== why) log.info("putting back after filing: waiting", { unit, for: why });
     this.restoreWaits = waiting;
+    const failed = new Map(restored.failed.map(({ unit, error }) => [unit, error]));
+    for (const [unit, error] of failed) if (this.restoreFailures.get(unit) !== error) log.warn("putting back after filing failed; it's tried again next time", { unit, error });
+    this.restoreFailures = failed;
     if (!this.config.paths.inbox || this.options.signal?.aborted) return;
     const window = filingWindow(new Date(), this.config.filing.at);
     if (window.open !== this.windowOpen && this.windowOpen !== undefined) {
@@ -202,6 +209,11 @@ export class Sync {
     }
     for (const [unit, problem] of problems) if (this.filingProblems.get(unit) !== problem) log.warn("not filed", { unit, problem });
     this.filingProblems = problems;
+    // Units only waiting (for Immich to read the sidecar, or the settle time) say so too, so a batch left in the inbox
+    // shows why.
+    const waits = new Map((report?.notReady ?? []).filter(({ unit }) => !problems.has(unit)).map(({ unit, why }) => [unit, why]));
+    for (const [unit, why] of waits) if (this.filingWaits.get(unit) !== why) log.info("promoted, not filed yet", { unit, why });
+    this.filingWaits = waits;
     if (filed.filed.length > 0) log.info(this.options.dryRun ? "would file (dry run)" : "filed a batch", { units: filed.filed.length });
 
     const soonest = Math.min(...(report?.notReady ?? []).flatMap((unit) => (unit.inMs !== undefined ? [unit.inMs] : [])));

@@ -524,6 +524,10 @@ are in the sidecar, so they need nothing. The rest is restored once each account
 - **The old copies:** check that they end up offline or removed, using only calls that can't reach the disk.
 
 **How it's put back** (`src/filing/restore.ts`, each run of the filing job, for each unit being put back):
+- **An error from Immich on one unit** leaves that unit being put back, to be tried again next run, and logged once
+  per error. The others go on, and so does filing. Every step reads the new copy first, so trying again redoes
+  nothing. Before 0.4.1 the error ended the run: on the author's server (2026-11-22), Immich answered 500 for one new
+  copy's faces for over an hour, and nothing else was filed in that night's window.
 - **The new copies** are found by their path, in each account that had an old copy. One that's missing is waited for,
   until Immich's library queue is idle and 2 minutes have passed since the move: an account's libraries may leave the
   new path out (a date limit), and then its state can't be put back, which is reported.
@@ -909,7 +913,9 @@ left here is keeping them through filing, which makes a new asset:
   daemon's own tag taken off) was never asked to read the sidecar again, since the daemon's write restored the bytes
   it was last asked to read (section 5).
 - 2026-11-19: section 14 (rendering Darktable's edits) planned with the author. Not built.
+- 2026-11-20: section 14 widened to Immich's own edits, which the author decided follow the file. Not built.
 - 2026-11-21 (0.4.0): the creator is the tag `Creator/<creator>` in Immich, kept equal to `dc:creator` across the
   whole archive like the title (F3), since Immich shows no creator. The source's creator is given only on first contact
   (F2), and filing needs a creator (`Promote/Needs a creator`, section 7).
-- 2026-11-20: section 14 widened to Immich's own edits, which the author decided follow the file. Not built.
+- 2026-11-22 (0.4.1): an error from Immich while putting back one unit no longer ends the filing run (section 7), and
+  promoted units waiting to be filed say why in the log, once per reason.

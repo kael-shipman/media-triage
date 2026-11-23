@@ -8,7 +8,8 @@ you're about to build would change it, ask the author first.
 session stops partway. Each step ends with tests passing, the type check clean, a commit and a push; CI must stay
 green.
 
-**Last updated:** 2026-11-21 (`v0.4.0`: the creator as the tag `Creator/<creator>`, "The creator's tag" below).
+**Last updated:** 2026-11-22 (`v0.4.1`: a put-back error no longer stops filing, "One unit's put-back error" below).
+2026-11-21: `v0.4.0`, the creator as the tag `Creator/<creator>`, "The creator's tag" below.
 2026-11-20: milestones 9 and 10, edits, planned (DESIGN.md section 14; not started). 2026-11-14: `v0.3.0`, the
 `Inbox` tag, "The Inbox tag" below. `v0.2.0` (2026-11-11): filing
 only in a daily window, "Filing at night" below. **All 8 milestones are done** (the last,
@@ -21,7 +22,7 @@ run", below). `v0.1.1`'s dry run there was good, and **it's been live on the aut
 ## Working on it
 
 - **Bun 1.4** runs and builds it. Without Bun installed, `npx --yes bun@1.4.4` stands in for `bun`:
-  - `bun test`: the unit tests (437; 435 in CI, which skips the two that need Darktable), and the integration tests,
+  - `bun test`: the unit tests (438; 436 in CI, which skips the two that need Darktable), and the integration tests,
     skipped;
   - `bun run typecheck`: TypeScript, over `src/`, `scripts/` and `test/`;
   - `bun run build [version]`: executables for linux-x64 and linux-arm64 in `dist/` (`TARGETS=linux-x64` for one).
@@ -29,7 +30,7 @@ run", below). `v0.1.1`'s dry run there was good, and **it's been live on the aut
   `127.0.0.1:2284`, with made-up users (`alex@example.com`, the admin, and `sam@example.com`).
   - `bun run immich up` starts it (about a minute) and `bun run immich down` deletes everything. Leave it down when
     you stop: its database is in memory anyway.
-  - `MEDIA_TRIAGE_IMMICH_TESTS=1 bun test` runs everything against it (498 tests). Run it twice in a row on one
+  - `MEDIA_TRIAGE_IMMICH_TESTS=1 bun test` runs everything against it (499 tests). Run it twice in a row on one
     instance before calling a step done: tests must not depend on what other tests left behind.
   - `bun test/immich/smoke.ts` is the daemon's smoke test (about 5 minutes): it runs `media-triage run` itself, with
     two fresh accounts, and checks that it files a batch end to end (the file's header says what it does). Run it
@@ -48,7 +49,7 @@ run", below). `v0.1.1`'s dry run there was good, and **it's been live on the aut
 - **Immich's source**, for checking behavior: the fork's clone at `~/Desktop/tmp-repos/immich`, branch `twins`, based
   on v3.3.5. Look in `server/src`: `controllers/`, `dtos/`, `services/`, `repositories/`. Use Immich only through
   its API, never its database.
-- **Releases:** `v0.4.0` (2026-11-21, the creator's tag), `v0.3.0` (2026-11-14, the `Inbox` tag), `v0.2.0` (2026-11-11, filing at a set time), `v0.1.3` (2026-11-09, the refresh loop), `v0.1.2` (2026-11-08, duplicates filed, the watcher's names), `v0.1.1` (2026-11-07, the fixes from the
+- **Releases:** `v0.4.1` (2026-11-22, put-back errors contained), `v0.4.0` (2026-11-21, the creator's tag), `v0.3.0` (2026-11-14, the `Inbox` tag), `v0.2.0` (2026-11-11, filing at a set time), `v0.1.3` (2026-11-09, the refresh loop), `v0.1.2` (2026-11-08, duplicates filed, the watcher's names), `v0.1.1` (2026-11-07, the fixes from the
   first dry run on the author's archive), `v0.1.0`
   (2026-11-07, everything through milestone 8 and the fixes of 2026-11-05), and the
   pre-releases `v0.1.0-rc.1` and `rc.2`, from milestone 1 only. Pushing a tag `vX.Y.Z` publishes a release
@@ -286,6 +287,21 @@ can run beside the live daemon on a copy), then installed. 15,402 units: 15,392 
 `dc:creator` changes at all, and the only conflicts were 9 that predate it (a title holding a `/`). The 12 changes to
 Darktable's tag fields were tags `Creator/…` made by hand in Immich before 0.4.0, which 0.3.0 had copied into
 Darktable's tags, and which are now the creator instead.
+
+## One unit's put-back error (2026-11-22, `v0.4.1`)
+
+Found on the author's server, in the first filing window after `v0.4.0`. Two units were filed at 02:02. Putting back
+one of them, Immich answered 500 ("Failed to get faces") for its new copy's faces until 03:47. `restorePending` runs at
+the start of every filing run and didn't catch it, so every run in the window ended there, and the promoted batch
+waiting behind it was never looked at again. It had been waiting at 02:02 for its copies to read their sidecars
+(`v0.4.0`'s first run was still re-reading the archive), which wasn't logged, so it looked stuck.
+
+Now an error on one unit leaves it being put back, to be tried again next run, logged once per error
+(`RestoreReport.failed`), and the others and filing go on. The library-queue check before the loop counts an error as
+busy. A promoted unit that's only waiting logs why ("promoted, not filed yet"), once per reason.
+
+Tests: `src/filing/restore.test.ts` (it failed without the fix). All 499 tests passed twice in a row against the
+development Immich, and the smoke test (27 of 27).
 
 ## Next: running it for real
 

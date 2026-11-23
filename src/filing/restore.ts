@@ -5,6 +5,10 @@
 // Every step looks at what the new copy says first, so running it again changes nothing that's already so. It waits,
 // up to `RESTORE_LIMIT_MS` after the move, for what Immich hasn't done yet: indexing the new path, detecting and
 // recognizing the faces there, taking the old copies offline. Then it does what it can, and reports the rest.
+//
+// A unit Immich fails on (an error from its API) stays pending, and is tried again next time; the others go on. Otherwise
+// one unit's error would end every filing pass, which starts here, for as long as it lasted (found on the author's
+// server, 2026-11-22: Immich answered 500 for one new copy's faces for over an hour, and nothing else was filed).
 
 import { type AssetVisibility } from "@immich/sdk";
 import { existsSync } from "node:fs";
@@ -31,20 +35,29 @@ export interface RestoreReport {
   done: { unit: string; problems: string[] }[];
   /** Units still waiting for Immich, and for what. */
   waiting: { unit: string; why: string }[];
+  /** Units Immich failed on this time, with its error: they're tried again next time. */
+  failed: { unit: string; error: string }[];
 }
 
 type Outcome = { waiting: string } | { problems: string[] };
 
 export async function restorePending(ctx: ReconcileContext): Promise<RestoreReport> {
-  const report: RestoreReport = { done: [], waiting: [] };
+  const report: RestoreReport = { done: [], waiting: [], failed: [] };
   if (ctx.dryRun) return report;
   const filings = new FilingStore(ctx.store.db);
   const pending = filings.withStatus("restoring");
   if (pending.length === 0) return report;
   const admin = [...ctx.accounts.values()].find((account) => account.isAdmin);
-  const queueIdle = admin ? await libraryQueueIdle(admin.client) : false;
+  // Unknown is busy: missing copies are then waited for, up to the limit, rather than taken to be missing.
+  const queueIdle = admin ? await libraryQueueIdle(admin.client).catch(() => false) : false;
   for (const record of pending) {
-    const outcome = await restoreUnit(ctx, record, queueIdle);
+    let outcome: Outcome;
+    try {
+      outcome = await restoreUnit(ctx, record, queueIdle);
+    } catch (error) {
+      report.failed.push({ unit: record.unit, error: (error as Error).message });
+      continue;
+    }
     if ("waiting" in outcome) {
       report.waiting.push({ unit: record.unit, why: outcome.waiting });
       continue;
