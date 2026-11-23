@@ -3,6 +3,7 @@
 // removed, its tag and region go. The state records which tags and regions the daemon made, since a `People/…` tag
 // that was there before is hand made and stays, and regions from other tools stay too.
 
+import { personTagName } from "./people-from-tags.ts";
 import { type Area, type FaceBox, type Region, type RegionInfo, regionFromFace, sameArea } from "./regions.ts";
 
 /** A face to show in the sidecar: its person's name, as the account whose copy it's on calls them. */
@@ -21,7 +22,7 @@ export interface MadeRegion {
 
 /** The tag for a person, in Immich's notation. A "/" in a name would nest the tag, so it's "|" (F4's translation). */
 export function personTag(name: string): string {
-  return `People/${name.trim().replaceAll("/", "|")}`;
+  return `People/${personTagName(name)}`;
 }
 
 /** Regions read back can differ from the ones written in the last digits. */

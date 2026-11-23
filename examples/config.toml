@@ -49,6 +49,10 @@ mirrors_face_corrections = false
 # aren't read until the file is indexed again. The kael-shipman/immich fork fixes it. Without it, media-triage warns.
 reads_new_sidecars = false
 
+# Whether a person tagged by hand (People/<name>, or People/…/<name>) whom Immich didn't recognize in the photo is
+# added to it, as a face covering the whole photo, once (DESIGN.md, F12). It only adds people an account has named.
+people_from_tags = false
+
 # One block per Immich account. Log each in once with `media-triage login <name>`.
 [[immich.accounts]]
 name = "alex"                 # a label, used in logs and for the session file

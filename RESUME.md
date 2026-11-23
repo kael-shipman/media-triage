@@ -8,7 +8,8 @@ you're about to build would change it, ask the author first.
 session stops partway. Each step ends with tests passing, the type check clean, a commit and a push; CI must stay
 green.
 
-**Last updated:** 2026-11-22 (`v0.4.1`: a put-back error no longer stops filing, "One unit's put-back error" below).
+**Last updated:** 2026-11-22 (`v0.5.0`: people from tags, F12, and `rename-tag`, "People from tags" below).
+2026-11-22: `v0.4.1`, a put-back error no longer stops filing, "One unit's put-back error" below.
 2026-11-21: `v0.4.0`, the creator as the tag `Creator/<creator>`, "The creator's tag" below.
 2026-11-20: milestones 9 and 10, edits, planned (DESIGN.md section 14; not started). 2026-11-14: `v0.3.0`, the
 `Inbox` tag, "The Inbox tag" below. `v0.2.0` (2026-11-11): filing
@@ -22,7 +23,7 @@ run", below). `v0.1.1`'s dry run there was good, and **it's been live on the aut
 ## Working on it
 
 - **Bun 1.4** runs and builds it. Without Bun installed, `npx --yes bun@1.4.4` stands in for `bun`:
-  - `bun test`: the unit tests (438; 436 in CI, which skips the two that need Darktable), and the integration tests,
+  - `bun test`: the unit tests (449; 447 in CI, which skips the two that need Darktable), and the integration tests,
     skipped;
   - `bun run typecheck`: TypeScript, over `src/`, `scripts/` and `test/`;
   - `bun run build [version]`: executables for linux-x64 and linux-arm64 in `dist/` (`TARGETS=linux-x64` for one).
@@ -30,7 +31,7 @@ run", below). `v0.1.1`'s dry run there was good, and **it's been live on the aut
   `127.0.0.1:2284`, with made-up users (`alex@example.com`, the admin, and `sam@example.com`).
   - `bun run immich up` starts it (about a minute) and `bun run immich down` deletes everything. Leave it down when
     you stop: its database is in memory anyway.
-  - `MEDIA_TRIAGE_IMMICH_TESTS=1 bun test` runs everything against it (499 tests). Run it twice in a row on one
+  - `MEDIA_TRIAGE_IMMICH_TESTS=1 bun test` runs everything against it (511 tests). Run it twice in a row on one
     instance before calling a step done: tests must not depend on what other tests left behind.
   - `bun test/immich/smoke.ts` is the daemon's smoke test (about 5 minutes): it runs `media-triage run` itself, with
     two fresh accounts, and checks that it files a batch end to end (the file's header says what it does). Run it
@@ -49,7 +50,7 @@ run", below). `v0.1.1`'s dry run there was good, and **it's been live on the aut
 - **Immich's source**, for checking behavior: the fork's clone at `~/Desktop/tmp-repos/immich`, branch `twins`, based
   on v3.3.5. Look in `server/src`: `controllers/`, `dtos/`, `services/`, `repositories/`. Use Immich only through
   its API, never its database.
-- **Releases:** `v0.4.1` (2026-11-22, put-back errors contained), `v0.4.0` (2026-11-21, the creator's tag), `v0.3.0` (2026-11-14, the `Inbox` tag), `v0.2.0` (2026-11-11, filing at a set time), `v0.1.3` (2026-11-09, the refresh loop), `v0.1.2` (2026-11-08, duplicates filed, the watcher's names), `v0.1.1` (2026-11-07, the fixes from the
+- **Releases:** `v0.5.0` (2026-11-22, people from tags and `rename-tag`), `v0.4.1` (2026-11-22, put-back errors contained), `v0.4.0` (2026-11-21, the creator's tag), `v0.3.0` (2026-11-14, the `Inbox` tag), `v0.2.0` (2026-11-11, filing at a set time), `v0.1.3` (2026-11-09, the refresh loop), `v0.1.2` (2026-11-08, duplicates filed, the watcher's names), `v0.1.1` (2026-11-07, the fixes from the
   first dry run on the author's archive), `v0.1.0`
   (2026-11-07, everything through milestone 8 and the fixes of 2026-11-05), and the
   pre-releases `v0.1.0-rc.1` and `rc.2`, from milestone 1 only. Pushing a tag `vX.Y.Z` publishes a release
@@ -302,6 +303,33 @@ busy. A promoted unit that's only waiting logs why ("promoted, not filed yet"), 
 
 Tests: `src/filing/restore.test.ts` (it failed without the fix). All 499 tests passed twice in a row against the
 development Immich, and the smoke test (27 of 27).
+
+## People from tags (2026-11-22, `v0.5.0`)
+
+The author asked for it: photos tagged `People/<name>` by hand, whom Immich didn't recognize, didn't have the person,
+so a person was found two ways. DESIGN.md F12, behind `immich.people_from_tags` (off by default):
+- `src/core/people-from-tags.ts`: which tags (hand-made, the last part names the person, `|` read as `/`), which person
+  (an account's, by exact name, not hidden; two of one name are ambiguous), and on which copies (one, with
+  `mirrors_face_corrections`).
+- The reconcile adds each as a face covering the whole photo (`POST /api/faces`), records the people added
+  (`tagPeople`: never added again, so a removal sticks) and that the unit was looked at (`peopleChecked`). A unit being
+  put back after filing is left alone.
+- The full pass returns units with a hand-made `People/…` tag not looked at, while the switch is on, so the archive is
+  covered. A person named or renamed reconciles the units tagged with the name (`assetsTaggedWithPerson`, from
+  `PersonV1` in `src/sync/stream.ts`).
+- `media-triage rename-tag FROM TO [--dry-run]` (`src/sync/rename-tag.ts`): renames a tag and those under it in the
+  sidecars of the units the state knows, written as Darktable would; the running daemon carries it to Immich. For the
+  author's old names, before turning F12 on.
+- F10's `personTag` now shares `personTagName` with F12.
+
+On the author's server (measured from the state, 2026-11-22): 6,373 units with hand-made `People/…` tags, about 1,070
+of which would get a person, from 7 named people.
+
+Tests: `people-from-tags.test.ts`, `rename-tag.test.ts` (with exiftool), the config switch, the full pass's F12 check
+(`watch.test.ts`), and end to end "a hand-made People tag adds its person, once named…" (`reconcile.test.ts`): a
+person named after the tag reaches the photo, the face covers it, the other account (no mirroring on upstream Immich,
+no person of that name) gets none, and a removed person isn't added again. All 511 tests passed twice in a row
+against the development Immich, and the smoke test (27 of 27).
 
 ## Next: running it for real
 

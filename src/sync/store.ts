@@ -77,6 +77,10 @@ export interface SyncedValues extends Base {
    * so it isn't in the base's tags.
    */
   creatorTag?: boolean;
+  /** The people (person group IDs) the daemon added to this file from its tags (F12): never added again. */
+  tagPeople?: string[];
+  /** Whether the file was looked at under F12, with nothing left to try: the full pass returns those that weren't. */
+  peopleChecked?: boolean;
   /** The `People/…` tags the daemon made from faces (F10); others are hand made, and never removed. */
   people?: string[];
   /** The face regions the daemon made (F10), so they can be told from other tools' regions. */
@@ -508,6 +512,41 @@ export class SyncStore {
 
   removePerson(account: string, id: string): void {
     this.db.query("delete from people where account = ? and id = ?").run(account, id);
+  }
+
+  /** The units whose last-synced tags include `tag`, or a tag under it (`tag/…`): `rename-tag`'s. */
+  unitsWithTagOrUnder(tag: string): string[] {
+    return this.db
+      .query<{ path: string }, [string, string]>(
+        `select path from units where gone is null
+         and exists (select 1 from json_each(units.synced, '$.tags') where value = ?1 or substr(value, 1, length(?2)) = ?2) order by path`,
+      )
+      .all(tag, `${tag}/`)
+      .map((row) => row.path);
+  }
+
+  /** An account's people with this name (F12): more than one is ambiguous. */
+  peopleNamed(account: string, name: string): PersonRecord[] {
+    return this.db
+      .query<{ id: string; hidden: number }, [string, string]>("select id, hidden from people where account = ? and name = ? order by id")
+      .all(account, name)
+      .map((row) => ({ account, id: row.id, name, hidden: row.hidden === 1 }));
+  }
+
+  /**
+   * The copies (asset IDs) of every unit with a `People/…` tag whose last part is this tag-name (F12): `People/<name>`
+   * or `People/…/<name>`. A person named or renamed is looked for there.
+   */
+  assetsTaggedWithPerson(tagName: string): string[] {
+    return this.db
+      .query<{ id: string }, [string, string]>(
+        `select distinct assets.id from units join assets on assets.local = units.path
+         where exists (select 1 from json_each(units.synced, '$.tags') where substr(value, 1, 7) = 'People/'
+           and (value = 'People/' || ?1 or substr(value, -length(?2)) = ?2))
+         order by assets.id`,
+      )
+      .all(tagName, `/${tagName}`)
+      .map((row) => row.id);
   }
 
   /** An account's own record of a person. */

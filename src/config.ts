@@ -66,6 +66,8 @@ export interface Config {
     mirrorsFaceCorrections: boolean;
     /** Whether the server's metadata refresh reads a sidecar that appeared after it indexed the file (F1). */
     readsNewSidecars: boolean;
+    /** Whether a hand-made `People/…` tag adds its person to the photo, as a face (DESIGN.md, F12). */
+    peopleFromTags: boolean;
     accounts: Account[];
     libraries: Library[];
   };
@@ -132,6 +134,7 @@ export function parseConfig(raw: unknown, file: string | null): Config {
   unique(pathMap.map((mapping) => mapping.local), "immich.path_map: local");
   const mirrorsFaceCorrections = immichTable.bool("mirrors_face_corrections", false);
   const readsNewSidecars = immichTable.bool("reads_new_sidecars", false);
+  const peopleFromTags = immichTable.bool("people_from_tags", false);
 
   const accounts = immichTable.tables("accounts").map((table) => {
     const account = {
@@ -208,7 +211,7 @@ export function parseConfig(raw: unknown, file: string | null): Config {
     paths: { inbox, archive, state },
     sources,
     filing,
-    immich: { url, pathMap, mirrorsFaceCorrections, readsNewSidecars, accounts, libraries },
+    immich: { url, pathMap, mirrorsFaceCorrections, readsNewSidecars, peopleFromTags, accounts, libraries },
     timing,
     upgrade,
     log: logSettings,

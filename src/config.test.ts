@@ -91,6 +91,11 @@ test("filing's time defaults to 04:00, and is written HH:MM", () => {
   expect(parseConfig({ filing: { at: "2:05" } }, null).filing.at).toBe("02:05");
 });
 
+test("people_from_tags defaults to false", () => {
+  expect(parseConfig({}, null).immich.peopleFromTags).toBe(false);
+  expect(parseConfig({ immich: { people_from_tags: true } }, null).immich.peopleFromTags).toBe(true);
+});
+
 test("reads_new_sidecars defaults to false", () => {
   expect(parseConfig({}, null).immich.readsNewSidecars).toBe(false);
   expect(parseConfig({ immich: { reads_new_sidecars: true } }, null).immich.readsNewSidecars).toBe(true);

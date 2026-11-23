@@ -437,6 +437,27 @@ If the state is lost, merge as a union, which never drops a tag, and report it.
     gone at least the grace period (`timing.orphan_grace`) earlier, after listing the folder again. The unit's record
     goes with it. So a sidecar goes at the first full pass after the grace period, which can be a day later.
   - **A dry run** reports what it would delete, and notes nothing.
+- **F12. People from tags** (asked for by the author, 2026-11-22; `immich.people_from_tags`, off by default). A
+  person tagged by hand, but not recognized in the photo, is added to it in Immich, so each person is found one way.
+  F10 is the other direction: a person in the photo gets a tag.
+  - **Which tags:** a `People/…` tag that's hand-made (not one the daemon made, F10). Its last part is the person's
+    name, with `|` read as `/` (F10's tag translation): `People/Jess Example` and `People/Family/Jess Example` both
+    name Jess Example. Tags that name no one, such as a group (`People/Family`), stay plain tags.
+  - **Which person:** one that an account with a copy of the file names exactly so, and doesn't hide. Two of an
+    account's people with the same name are ambiguous: that tag is skipped, and reported. It never creates a person.
+  - **When:** the person has no face in any copy of the file (visible or not, and not deleted), and the daemon hasn't
+    added them to this file before. **Once only:** a person the daemon added and someone then removed in Immich stays
+    removed. The hand-made tag stays, as a plain tag (F10 never removes hand-made tags).
+  - **How:** a face added by hand (`POST /api/faces`) covering the whole photo or video, since where the person is
+    isn't known. On one copy, when the server mirrors face corrections between copies (the fork); otherwise on each
+    copy whose account names the person. From then on it's a face like any other: F10 gives it a tag and, for a photo,
+    a region, which covers the whole photo too.
+  - **Recorded** in the unit's record: the people added to it (`tagPeople`), and that it was looked at under this rule
+    (`peopleChecked`). The full pass returns units with a hand-made `People/…` tag that weren't looked at (section 3),
+    so the archive is covered once the switch is on. Naming or renaming a person reconciles every unit with a tag
+    whose last part is the new name, so a person named later reaches the photos tagged with them.
+  - **Not on a unit being put back after filing** (section 7), whose faces filing restores, nor in a dry run, which
+    reports what it would add.
 
 It writes only when a field actually has to change. Sidecars sync to every machine, and Darktable lists every changed
 sidecar when it starts.
@@ -712,6 +733,11 @@ step that only reads, and reports what the others would change.
     Debian 13 has 13.25. CI installs Ubuntu's and checks that the executable uses it.
   - **`media-triage sidecar FILE`** prints what the daemon reads from a sidecar (or from `FILE.xmp`), and what Immich
     and Darktable each read from it, as JSON. It needs no configuration.
+- **`media-triage rename-tag FROM TO`** renames a tag, and the tags under it (`FROM/…`), in every sidecar of the units
+  the state knows that have it, in Immich's notation (2026-11-22). It writes the sidecars as Darktable would, and the
+  running daemon carries the change to Immich, as for any edit made in Darktable. `--dry-run` lists what it would
+  change. Run it with the daemon running. Immich keeps the old tag, empty, until its tag cleanup job runs
+  (Administration → Jobs). The title's and the creator's tags aren't renamed this way: change the title or the creator.
 - **Layout:**
   - `src/main.ts`: the command line;
   - `src/core/`: the pure rules, without I/O, including a sidecar's fields and what each tool reads from them
@@ -919,3 +945,4 @@ left here is keeping them through filing, which makes a new asset:
   (F2), and filing needs a creator (`Promote/Needs a creator`, section 7).
 - 2026-11-22 (0.4.1): an error from Immich while putting back one unit no longer ends the filing run (section 7), and
   promoted units waiting to be filed say why in the log, once per reason.
+- 2026-11-22 (0.5.0): F12, people from tags, and `media-triage rename-tag`.

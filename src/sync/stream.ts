@@ -5,6 +5,7 @@
 import { type Asset, getAsset, libraryPages, searchPages } from "../immich/assets.ts";
 import { acknowledge, type SyncEvent, syncStream } from "../immich/sync.ts";
 import type { PathMap } from "../core/path-map.ts";
+import { personTagName } from "../core/people-from-tags.ts";
 import { log } from "../log.ts";
 import type { OpenAccount } from "../upkeep/accounts.ts";
 import type { AssetRecord, FaceRecord, SyncStore } from "./store.ts";
@@ -199,6 +200,8 @@ function recordAlbumsAndFaces(account: string, store: SyncStore, events: readonl
       case "PersonV1":
         for (const id of store.putPeople([{ account, id: event.data.id, name: event.data.name, hidden: event.data.isHidden }])) {
           touched.push(...store.assetsWithPerson(id));
+          // F12: the photos tagged with the name, which this person may now be added to.
+          if (event.data.name.trim()) touched.push(...store.assetsTaggedWithPerson(personTagName(event.data.name)));
         }
         break;
       case "PersonDeleteV1":

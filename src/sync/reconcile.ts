@@ -18,11 +18,13 @@ import type { Config } from "../config.ts";
 import { type FacesOutcome, type NamedFace, applyFaces } from "../core/faces.ts";
 import { readiness, withInbox, withNeeds } from "../core/filing.ts";
 import { type Base, type Side, type SideValues, mergeUnit, normalizeDescription, normalizeRating } from "../core/merge.ts";
+import { planPeopleFromTags } from "../core/people-from-tags.ts";
 import { isDarktableInternalInImmich, sameTags } from "../core/tags.ts";
 import { CREATOR, TITLE } from "../core/titles.ts";
 import { PROMOTE_TAG } from "../core/naming.ts";
 import { type AccountState, type ImageFacts, type Wanted, type XmpFields, darktableReads, dateFromImmich, hasDate, imageTags, immichReads, immichReadsImageTags, offsetFromImmich, sameDate } from "../core/xmp.ts";
 import { type Asset, getAsset, refreshMetadata, restoreAssets, trashAssets } from "../immich/assets.ts";
+import { createFace } from "../immich/faces.ts";
 import { log } from "../log.ts";
 import type { Exiftool } from "../sidecars/exiftool.ts";
 import { createSidecar, readSidecar, type Sidecar, writeSidecar } from "../sidecars/sidecar.ts";
@@ -75,6 +77,10 @@ export interface ReconcileReport {
   conflicts: { unit: string; problem: string }[];
   /** Units left for the next pass, and why. */
   waiting: { unit: string; why: string }[];
+  /** People added to units from their tags (F12), or that would be, in a dry run. */
+  peopleAdded: { unit: string; name: string }[];
+  /** Units whose `People/…` tag names more than one of an account's people (F12), with the name. */
+  ambiguousPeople: { unit: string; name: string }[];
   /** Inbox units ready to file (DESIGN.md, section 7)… */
   ready: ReadyUnit[];
   /** …and those tagged `Promote` that aren't yet, with why, and when to look again if it's a matter of time. */
@@ -232,6 +238,8 @@ export async function reconcile(ctx: ReconcileContext, units: readonly string[])
     restored: [],
     conflicts: [],
     waiting: [],
+    peopleAdded: [],
+    ambiguousPeople: [],
     ready: [],
     notReady: [],
   };
@@ -279,7 +287,7 @@ export async function reconcile(ctx: ReconcileContext, units: readonly string[])
     recordAsked(ctx.store, [...ids].map((id) => ({ id, ...asked.get(id)! })), new Date(now).toISOString());
   }
 
-  if (report.written.length + report.created.length + report.refreshed + report.trashed.length + report.restored.length + report.conflicts.length > 0) {
+  if (report.written.length + report.created.length + report.refreshed + report.trashed.length + report.restored.length + report.conflicts.length + report.peopleAdded.length > 0) {
     log.info(ctx.dryRun ? "reconciled (dry run: nothing changed)" : "reconciled", {
       units: report.units,
       sidecars: report.written.length || undefined,
@@ -288,10 +296,12 @@ export async function reconcile(ctx: ReconcileContext, units: readonly string[])
       trashed: report.trashed.length || undefined,
       restored: report.restored.length || undefined,
       conflicts: report.conflicts.length || undefined,
+      people: report.peopleAdded.length || undefined,
       waiting: report.waiting.length || undefined,
     });
   }
   for (const { unit, problem } of report.conflicts) log.warn("conflict: left as it is", { unit, problem });
+  for (const { unit, name } of report.ambiguousPeople) log.warn("a People tag names more than one person in an account: no one added", { unit, name });
   if (report.unread.length > 0) {
     log.warn("Immich won't read these new sidecars until the server reads sidecars made after indexing (reads_new_sidecars, F1)", {
       count: report.unread.length,
@@ -300,6 +310,7 @@ export async function reconcile(ctx: ReconcileContext, units: readonly string[])
   }
   if (ctx.dryRun) {
     for (const { unit, fields } of report.written.slice(0, 20)) log.info("would write", { unit, fields: fields.join(",") });
+    for (const { unit, name } of report.peopleAdded.slice(0, 20)) log.info("would add a person from a tag", { unit, person: name });
     // How many sidecars each field would be written in, so a large first run can be checked by its shape.
     const byField = new Map<string, number>();
     for (const { fields } of report.written) for (const field of fields) byField.set(field, (byField.get(field) ?? 0) + 1);
@@ -518,12 +529,51 @@ async function reconcileUnit(
     if (!merged.trashed && copy.asset.isTrashed) tell.restore(copy);
   }
 
+  // F12: people tagged by hand and not on the file are added to it, once, as a face covering the whole photo.
+  const tagPeople = new Set(previous?.synced.tagPeople ?? []);
+  let peopleChecked = previous?.synced.peopleChecked;
+  if (ctx.config.immich.peopleFromTags && fields && !held) {
+    const present = new Set(allRecords.flatMap((record) => store.facesOn(record.id).flatMap((face) => (face.person !== null && face.deleted === null ? [face.person] : []))));
+    const plan = planPeopleFromTags({
+      tags: merged.tags,
+      made: faces?.madeTags ?? previous?.synced.people ?? [],
+      copies: copies.map((copy) => ({ account: copy.record.account, asset: copy.asset.id })),
+      peopleNamed: (account, name) => store.peopleNamed(account, name),
+      present,
+      added: tagPeople,
+      mirrors: ctx.config.immich.mirrorsFaceCorrections,
+    });
+    for (const name of plan.ambiguous) report.ambiguousPeople.push({ unit, name });
+    let failed = false;
+    for (const face of plan.add) {
+      const copy = copies.find((each) => each.asset.id === face.asset)!;
+      const [width, height] = [copy.asset.width ?? copy.asset.exifInfo?.exifImageWidth, copy.asset.height ?? copy.asset.exifInfo?.exifImageHeight];
+      if (!width || !height) {
+        // Immich hasn't measured it yet: looked at again with the unit.
+        failed = true;
+        continue;
+      }
+      report.peopleAdded.push({ unit, name: face.name });
+      if (dryRun) continue;
+      try {
+        await createFace(copy.account.client, { assetId: face.asset, personId: face.person, imageWidth: width, imageHeight: height, x: 0, y: 0, width, height });
+        tagPeople.add(face.person);
+      } catch (error) {
+        log.warn("couldn't add a person from a tag; tried again with the unit", { unit, person: face.name, error: (error as Error).message });
+        failed = true;
+      }
+    }
+    peopleChecked = !failed;
+  }
+
   // 5. Record what every side now says, with the sidecar's stamp, so the daemon's own writes aren't acted on again.
   if (!dryRun) {
     const { from: _, ...values } = merged;
     const synced: SyncedValues = {
       ...values,
       creatorTag: true,
+      ...(tagPeople.size > 0 ? { tagPeople: [...tagPeople].sort() } : {}),
+      ...(peopleChecked !== undefined ? { peopleChecked } : {}),
       people: faces?.madeTags ?? previous?.synced.people ?? [],
       regions: faces?.madeRegions ?? previous?.synced.regions ?? [],
       copies: copies.map((copy) => copy.asset.id),

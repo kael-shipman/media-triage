@@ -16,6 +16,9 @@ import { PromptCancelled, readPassword } from "./prompt.ts";
 import { darktableReads, immichReads } from "./core/xmp.ts";
 import { Exiftool, ExiftoolMissing } from "./sidecars/exiftool.ts";
 import { readSidecar } from "./sidecars/sidecar.ts";
+import { State } from "./state.ts";
+import { renameProblem, renameTag } from "./sync/rename-tag.ts";
+import { SyncStore } from "./sync/store.ts";
 import { openAccounts } from "./upkeep/accounts.ts";
 import { checkLibraries, formatReport } from "./upkeep/check.ts";
 import { UpgradeError, upgrade } from "./upgrade.ts";
@@ -31,6 +34,8 @@ Commands:
   login ACCOUNT    Log an Immich account in, with its password, and keep the session
   check            Check that each library limited by date holds exactly what its date allows
   sidecar FILE     Print what media-triage reads from a sidecar: FILE, or FILE.xmp for a media file
+  rename-tag FROM TO
+                   Rename a tag, and the tags under it, in every sidecar that has it (Immich's notation: People/Robin)
   init             Write a starter configuration, unless there's one already
   config           Check the configuration, and print it with the defaults filled in
   upgrade          Upgrade to the newest release the configuration's [upgrade] track allows
@@ -39,7 +44,7 @@ Commands:
 
 Options:
   --config FILE      The configuration file (default: ${defaultConfigPath()})
-  --dry-run          (run) Do everything except changing anything
+  --dry-run          (run, rename-tag) Do everything except changing anything
   --check            (upgrade) Only report whether there's a newer release
   --to VERSION       (upgrade) Install this release instead, even an older one
   --log-level LEVEL  debug, info, warn or error (default: the configuration's, or info)
@@ -57,7 +62,7 @@ const OPTIONS = {
 } as const;
 
 /** Which arguments each command takes. */
-const COMMAND_ARGUMENTS: Record<string, readonly string[]> = { login: ["ACCOUNT"], sidecar: ["FILE"] };
+const COMMAND_ARGUMENTS: Record<string, readonly string[]> = { login: ["ACCOUNT"], sidecar: ["FILE"], "rename-tag": ["FROM", "TO"] };
 
 /** Which options each command accepts, besides --config, --log-level and --help. */
 const COMMAND_OPTIONS: Record<string, readonly string[]> = {
@@ -65,6 +70,7 @@ const COMMAND_OPTIONS: Record<string, readonly string[]> = {
   login: [],
   check: [],
   sidecar: [],
+  "rename-tag": ["dry-run"],
   init: [],
   config: [],
   upgrade: ["check", "to"],
@@ -124,6 +130,8 @@ export async function main(argv: string[]): Promise<number> {
         return await checkNow(loadConfig(configFile));
       case "sidecar":
         return await showSidecar(args[0]!);
+      case "rename-tag":
+        return await renameTagNow(loadConfig(configFile), args[0]!, args[1]!, { dryRun: values["dry-run"] ?? false });
       case "run": {
         const config = loadConfig(configFile);
         if (!logLevel) setLogLevel(config.log.level);
@@ -202,6 +210,27 @@ async function checkNow(config: Config): Promise<number> {
   const report = await checkLibraries(config, accounts.open, await listLibraries(admin.client));
   console.log(formatReport(report).join("\n"));
   return report.ok ? EXIT.ok : EXIT.error;
+}
+
+/**
+ * `media-triage rename-tag FROM TO`: renames a tag in the sidecars of the units the state knows (DESIGN.md, section
+ * 10). The running daemon carries the change to Immich.
+ */
+async function renameTagNow(config: Config, from: string, to: string, options: { dryRun: boolean }): Promise<number> {
+  const problem = renameProblem(from, to);
+  if (problem) return usage(`Can't rename: ${problem}`);
+  const state = State.open(config.paths.state);
+  const exiftool = await Exiftool.start();
+  try {
+    const report = await renameTag(new SyncStore(state.db), exiftool, from, to, options);
+    for (const unit of report.changedMeanwhile) log.warn("its sidecar changed while it was written: run it again", { unit });
+    log.info(options.dryRun ? "would rename (dry run)" : "renamed", { from, to, sidecars: report.renamed.length, first: report.renamed[0] });
+    if (!options.dryRun && report.renamed.length > 0) log.info("the running daemon carries it to Immich; Immich's tag cleanup job then removes the old, empty tag");
+    return report.changedMeanwhile.length > 0 ? EXIT.error : EXIT.ok;
+  } finally {
+    await exiftool.close();
+    state.close();
+  }
 }
 
 /**

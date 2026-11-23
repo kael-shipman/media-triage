@@ -292,6 +292,46 @@ describeImmich("reconciling a unit with two accounts' copies", () => {
     expect(fields.regions).toBeUndefined();
   }, 180_000);
 
+  test("a hand-made People tag adds its person, once named, as a face on the whole photo; removed, they stay removed (F12)", async () => {
+    const { accounts, unit, store, map, ctx, copy, read, token } = await twoAccounts("people-from-tags");
+    ctx.config.immich.peopleFromTags = true;
+    const sync = async () => {
+      for (const account of accounts) await consumeStream(account, store, map, { act: async (units) => void (await reconcile(ctx, units)) });
+    };
+    const oneToken = await token("one");
+    const facesOf = () => api<{ id: string; person: { id: string } | null; boundingBoxX1: number; boundingBoxY1: number; boundingBoxX2: number; boundingBoxY2: number; imageWidth: number; imageHeight: number }[]>("GET", `/faces?id=${copy("one").id}`, { token: oneToken });
+    const syncUntil = <T,>(what: string, check: () => Promise<T | undefined>) =>
+      waitFor(what, async () => {
+        await sync();
+        return check();
+      });
+    // The fixture's sidecar has the hand-made tag People|Robin Example, and no one is named so yet: nothing to add.
+    await sync();
+    expect(await facesOf()).toEqual([]);
+    expect(store.unit(unit)?.synced.peopleChecked).toBe(true);
+
+    // Account one names someone Robin Example: the photo tagged with them gets them, as a face covering it all. Account
+    // two names no one so, and the server doesn't mirror faces, so its copy gets none.
+    const person = await api<{ id: string }>("POST", "/people", { token: oneToken, body: { name: "Robin Example" } });
+    const [face] = await syncUntil("Robin added from the tag", async () => {
+      const faces = await facesOf();
+      return faces.length > 0 ? faces : undefined;
+    });
+    const asset = await read("one");
+    expect(face).toMatchObject({ person: { id: person.id }, boundingBoxX1: 0, boundingBoxY1: 0, boundingBoxX2: asset.width!, boundingBoxY2: asset.height! });
+    expect(store.unit(unit)?.synced.tagPeople).toEqual([person.id]);
+    const twoFaces = await api<unknown[]>("GET", `/faces?id=${copy("two").id}`, { token: await token("two") });
+    expect(twoFaces).toEqual([]);
+
+    // Removed in Immich: the daemon doesn't add Robin again, and the hand-made tag stays.
+    await api("DELETE", `/faces/${face!.id}`, { token: oneToken, body: { force: false } });
+    await syncUntil("the face gone from the state", async () => (store.facesOn(copy("one").id).every((each) => each.deleted !== null) ? true : undefined));
+    await sync();
+    await reconcile(ctx, [unit]);
+    expect((await facesOf()).filter((each) => each.person !== null)).toEqual([]);
+    expect((await readSidecar(exiftool, `${unit}.xmp`))!.fields.hierarchicalSubject).toContain("People|Robin Example");
+  }, 180_000);
+
   test("an inbox unit tagged Promote is ready once every copy has read the sidecar; without a title it needs one", async () => {
     const { unit, ctx, settled } = await twoAccounts("ready", { inbox: true });
     const tagsOf = (asset: Asset) => (asset.tags ?? []).map((tag) => tag.value).sort();

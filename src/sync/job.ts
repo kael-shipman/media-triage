@@ -99,7 +99,9 @@ export class Sync {
    * about `Inbox`, and deletes orphan sidecars whose media file has been gone for the grace period (F11).
    */
   async fullPass(): Promise<void> {
-    const result = await fullPass(this.store, this.covered.folders, (path) => sourceOf(this.config, path) !== undefined);
+    const result = await fullPass(this.store, this.covered.folders, (path) => sourceOf(this.config, path) !== undefined, {
+      peopleFromTags: this.config.immich.peopleFromTags,
+    });
     for (const unit of result.changed) this.dirty.add(unit);
     const { dryRun } = this.options;
     const orphans = handleOrphans(this.store, result.orphans, { graceMs: this.config.timing.orphanGraceMs, now: Date.now(), dryRun });

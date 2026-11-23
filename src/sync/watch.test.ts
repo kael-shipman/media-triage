@@ -169,6 +169,25 @@ test("the full pass returns units recorded with a creator that wasn't yet its ta
   state.close();
 });
 
+test("with F12 on, the full pass returns units with a hand-made People tag not yet looked at under it", async () => {
+  const state = State.open(join(dir, "state"));
+  const store = new SyncStore(state.db);
+  const archive = join(dir, "media", "Pictures");
+  for (const name of ["hand.jpg", "checked.jpg", "made.jpg", "group.jpg", "none.jpg"]) touch(join(archive, name));
+  const synced = { rating: null, title: null, description: null, creator: null, tags: [] as string[], date: null, gps: null, trashed: false };
+  const updated = "2026-11-22T00:00:00.000Z";
+  store.putUnits([
+    { path: join(archive, "hand.jpg"), synced: { ...synced, tags: ["People/Robin Example"] }, updated },
+    { path: join(archive, "checked.jpg"), synced: { ...synced, tags: ["People/Robin Example"], peopleChecked: true }, updated },
+    { path: join(archive, "made.jpg"), synced: { ...synced, tags: ["People/Robin Example"], people: ["People/Robin Example"] }, updated },
+    { path: join(archive, "group.jpg"), synced: { ...synced, tags: ["People/Family/Robin Example"] }, updated },
+    { path: join(archive, "none.jpg"), synced: { ...synced, tags: ["Places/Lake"] }, updated },
+  ]);
+  expect((await fullPass(store, [archive], undefined, { peopleFromTags: true })).changed).toEqual([join(archive, "group.jpg"), join(archive, "hand.jpg")]);
+  expect((await fullPass(store, [archive])).changed).toEqual([]);
+  state.close();
+});
+
 test("the full pass counts a link to a file as a file, as Immich does, but doesn't enter a linked folder", async () => {
   const state = State.open(join(dir, "state"));
   const store = new SyncStore(state.db);
