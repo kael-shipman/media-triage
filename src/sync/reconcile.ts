@@ -18,7 +18,7 @@ import type { Config } from "../config.ts";
 import { type FacesOutcome, type NamedFace, applyFaces } from "../core/faces.ts";
 import { readiness, withInbox, withNeeds } from "../core/filing.ts";
 import { type Base, type Side, type SideValues, mergeUnit, normalizeDescription, normalizeRating } from "../core/merge.ts";
-import { planPeopleFromTags } from "../core/people-from-tags.ts";
+import { planPeopleFromTags, tagFaceBox } from "../core/people-from-tags.ts";
 import { isDarktableInternalInImmich, sameTags } from "../core/tags.ts";
 import { CREATOR, TITLE } from "../core/titles.ts";
 import { PROMOTE_TAG } from "../core/naming.ts";
@@ -529,7 +529,7 @@ async function reconcileUnit(
     if (!merged.trashed && copy.asset.isTrashed) tell.restore(copy);
   }
 
-  // F12: people tagged by hand and not on the file are added to it, once, as a face covering the whole photo.
+  // F12: people tagged by hand and not on the file are added to it, once, as a small face in the centre.
   const tagPeople = new Set(previous?.synced.tagPeople ?? []);
   let peopleChecked = previous?.synced.peopleChecked;
   if (ctx.config.immich.peopleFromTags && fields && !held) {
@@ -556,7 +556,7 @@ async function reconcileUnit(
       report.peopleAdded.push({ unit, name: face.name });
       if (dryRun) continue;
       try {
-        await createFace(copy.account.client, { assetId: face.asset, personId: face.person, imageWidth: width, imageHeight: height, x: 0, y: 0, width, height });
+        await createFace(copy.account.client, { assetId: face.asset, personId: face.person, imageWidth: width, imageHeight: height, ...tagFaceBox(width, height) });
         tagPeople.add(face.person);
       } catch (error) {
         log.warn("couldn't add a person from a tag; tried again with the unit", { unit, person: face.name, error: (error as Error).message });

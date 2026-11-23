@@ -2,31 +2,41 @@
 // favorite, visibility and albums, from the sidecar's per-account state (F9), and the face corrections, from the old
 // copies' faces in the state. The unit is held meanwhile (src/sync/reconcile.ts), and released once this is done.
 //
-// Every step looks at what the new copy says first, so running it again changes nothing that's already so. It waits,
-// up to `RESTORE_LIMIT_MS` after the move, for what Immich hasn't done yet: indexing the new path, detecting and
-// recognizing the faces there, taking the old copies offline. Then it does what it can, and reports the rest.
+// Every step looks at what the new copy says first, so running it again changes nothing that's already so. It waits
+// for what Immich hasn't done yet: indexing the new path, reading the new copies' metadata, detecting and recognizing
+// the faces there, taking the old copies offline. It waits at least `RESTORE_LIMIT_MS` after the move, and longer
+// while Immich's queues for that work are busy, up to `RESTORE_HARD_LIMIT_MS`. Then it does what it can, and reports
+// the rest.
 //
 // A unit Immich fails on (an error from its API) stays pending, and is tried again next time; the others go on. Otherwise
 // one unit's error would end every filing pass, which starts here, for as long as it lasted (found on the author's
 // server, 2026-11-22: Immich answered 500 for one new copy's faces for over an hour, and nothing else was filed).
 
-import { type AssetVisibility } from "@immich/sdk";
+import { type AssetVisibility, QueueName } from "@immich/sdk";
 import { existsSync } from "node:fs";
 import { type NewFace, type OldFace, awaitingDetection, faceActions } from "../core/face-match.ts";
 import { PathMap } from "../core/path-map.ts";
 import type { AccountState } from "../core/xmp.ts";
 import { addToAlbum, listAlbums } from "../immich/albums.ts";
 import { type Asset, findByPaths, getAsset, setFavorite, setVisibility } from "../immich/assets.ts";
+import { ImmichError } from "../immich/client.ts";
 import { createFace, deleteFace, getFaces, reassignFace } from "../immich/faces.ts";
-import { libraryQueueIdle } from "../immich/libraries.ts";
+import { libraryQueueIdle, queuesIdle } from "../immich/libraries.ts";
 import { log } from "../log.ts";
 import { readSidecar } from "../sidecars/sidecar.ts";
 import type { ReconcileContext } from "../sync/reconcile.ts";
 import type { OpenAccount } from "../upkeep/accounts.ts";
 import { type FilingRecord, FilingStore } from "./store.ts";
 
-/** How long after the move to wait for Immich, before doing what can be done and reporting the rest. */
+/** How long after the move to wait for Immich, at least, before doing what can be done and reporting the rest. */
 export const RESTORE_LIMIT_MS = 60 * 60_000;
+/**
+ * How long after the move to wait for Immich while it's still busy with the work put back waits for. On a busy server
+ * (a Pi, its machine learning timing out), detecting the faces at the new path took hours (2026-11-23).
+ */
+export const RESTORE_HARD_LIMIT_MS = 24 * 60 * 60_000;
+/** The queues of the work it waits for: indexing, reading metadata, and detecting and recognizing faces. */
+const WAITED_FOR = [QueueName.Library, QueueName.MetadataExtraction, QueueName.FaceDetection, QueueName.FacialRecognition];
 /** How long after the move missing copies are taken to be missing for good, once Immich's library queue is idle. */
 const INDEXED_MS = 2 * 60_000;
 
@@ -48,12 +58,14 @@ export async function restorePending(ctx: ReconcileContext): Promise<RestoreRepo
   const pending = filings.withStatus("restoring");
   if (pending.length === 0) return report;
   const admin = [...ctx.accounts.values()].find((account) => account.isAdmin);
-  // Unknown is busy: missing copies are then waited for, up to the limit, rather than taken to be missing.
+  // Unknown is busy: missing copies are then waited for, up to the limit, rather than taken to be missing. Without the
+  // admin's session, Immich's queues can't be read, so it waits for the limit alone.
   const queueIdle = admin ? await libraryQueueIdle(admin.client).catch(() => false) : false;
+  const immichIdle = admin ? await queuesIdle(admin.client, WAITED_FOR).catch(() => false) : true;
   for (const record of pending) {
     let outcome: Outcome;
     try {
-      outcome = await restoreUnit(ctx, record, queueIdle);
+      outcome = await restoreUnit(ctx, record, queueIdle, immichIdle);
     } catch (error) {
       report.failed.push({ unit: record.unit, error: (error as Error).message });
       continue;
@@ -69,9 +81,9 @@ export async function restorePending(ctx: ReconcileContext): Promise<RestoreRepo
   return report;
 }
 
-async function restoreUnit(ctx: ReconcileContext, record: FilingRecord, queueIdle: boolean): Promise<Outcome> {
+async function restoreUnit(ctx: ReconcileContext, record: FilingRecord, queueIdle: boolean, immichIdle: boolean): Promise<Outcome> {
   const elapsed = Date.now() - Date.parse(record.updated);
-  const late = elapsed >= RESTORE_LIMIT_MS;
+  const late = elapsed >= RESTORE_HARD_LIMIT_MS || (elapsed >= RESTORE_LIMIT_MS && immichIdle);
   if (!existsSync(record.destination)) return { problems: ["the filed file is gone, so nothing was put back"] };
 
   // The accounts that had a copy, by name, each with its session.
@@ -110,7 +122,18 @@ async function restoreUnit(ctx: ReconcileContext, record: FilingRecord, queueIdl
     const old: OldFace[] = (oldId ? ctx.store.facesOn(oldId) : [])
       .filter((face) => face.visible || face.deleted !== null)
       .map((face) => ({ ...face, deleted: face.deleted !== null }));
-    const fresh: NewFace[] = (await getFaces(account.client, copy.id)).map((face) => ({ ...face, person: face.person?.id ?? null }));
+    let faces;
+    try {
+      faces = await getFaces(account.client, copy.id);
+    } catch (error) {
+      // Immich answers 500 for a copy whose metadata it hasn't read yet: it looks the faces up with the copy's EXIF row,
+      // which isn't there until then (`person.service.ts`, `getFacesById`; `asset.repository.ts`, `getForFaces`).
+      if (!(error instanceof ImmichError && error.status === 500)) throw error;
+      if (!late) return { waiting: `Immich can't list the faces at the new path in ${name} yet (it hasn't read the copy's metadata)` };
+      problems.push(`${name}: the faces weren't put back: Immich couldn't list them at the new path (${error.message})`);
+      continue;
+    }
+    const fresh: NewFace[] = faces.map((face) => ({ ...face, person: face.person?.id ?? null }));
     if (awaitingDetection(old, fresh) && !late) return { waiting: "Immich hasn't detected and recognized the faces at the new path yet" };
     facePlans.push({ name, account, copy, old, fresh });
   }

@@ -23,7 +23,7 @@ run", below). `v0.1.1`'s dry run there was good, and **it's been live on the aut
 ## Working on it
 
 - **Bun 1.4** runs and builds it. Without Bun installed, `npx --yes bun@1.4.4` stands in for `bun`:
-  - `bun test`: the unit tests (449; 447 in CI, which skips the two that need Darktable), and the integration tests,
+  - `bun test`: the unit tests (453; 451 in CI, which skips the two that need Darktable), and the integration tests,
     skipped;
   - `bun run typecheck`: TypeScript, over `src/`, `scripts/` and `test/`;
   - `bun run build [version]`: executables for linux-x64 and linux-arm64 in `dist/` (`TARGETS=linux-x64` for one).
@@ -31,7 +31,7 @@ run", below). `v0.1.1`'s dry run there was good, and **it's been live on the aut
   `127.0.0.1:2284`, with made-up users (`alex@example.com`, the admin, and `sam@example.com`).
   - `bun run immich up` starts it (about a minute) and `bun run immich down` deletes everything. Leave it down when
     you stop: its database is in memory anyway.
-  - `MEDIA_TRIAGE_IMMICH_TESTS=1 bun test` runs everything against it (511 tests). Run it twice in a row on one
+  - `MEDIA_TRIAGE_IMMICH_TESTS=1 bun test` runs everything against it (515 tests). Run it twice in a row on one
     instance before calling a step done: tests must not depend on what other tests left behind.
   - `bun test/immich/smoke.ts` is the daemon's smoke test (about 5 minutes): it runs `media-triage run` itself, with
     two fresh accounts, and checks that it files a batch end to end (the file's header says what it does). Run it
@@ -321,6 +321,13 @@ so a person was found two ways. DESIGN.md F12, behind `immich.people_from_tags` 
   sidecars of the units the state knows, written as Darktable would; the running daemon carries it to Immich. For the
   author's old names, before turning F12 on.
 - F10's `personTag` now shares `personTagName` with F12.
+- The face is a square 8% of the photo's width on a side, centred (`tagFaceBox`; the author, 2026-11-23, rather than
+  the whole photo). Immich can't move a face, only reassign or delete it.
+- **Also in 0.5.0, putting back after filing** (`src/filing/restore.ts`), found the night after 0.4.1: Immich answered
+  500 for every new copy's faces until it had read the copy's metadata (`getForFaces` inner-joins the EXIF row), and,
+  with its machine learning timing out, faces at the new paths took over the hour the daemon waited. A 500 for the faces
+  is now waited for, and the hour counts only once Immich's library, metadata and face queues are idle
+  (`queuesIdle`), up to 24 hours.
 
 On the author's server (measured from the state, 2026-11-22): 6,373 units with hand-made `People/…` tags, about 1,070
 of which would get a person, from 7 named people.
@@ -328,7 +335,7 @@ of which would get a person, from 7 named people.
 Tests: `people-from-tags.test.ts`, `rename-tag.test.ts` (with exiftool), the config switch, the full pass's F12 check
 (`watch.test.ts`), and end to end "a hand-made People tag adds its person, once named…" (`reconcile.test.ts`): a
 person named after the tag reaches the photo, the face covers it, the other account (no mirroring on upstream Immich,
-no person of that name) gets none, and a removed person isn't added again. All 511 tests passed twice in a row
+no person of that name) gets none, and a removed person isn't added again. All 515 tests passed twice in a row
 against the development Immich, and the smoke test (27 of 27).
 
 ## Next: running it for real

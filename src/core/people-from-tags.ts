@@ -1,5 +1,5 @@
-// People from tags (DESIGN.md, F12): a hand-made `People/…` tag adds its person to the photo, as a face covering the
-// whole photo, where the person has no face in any copy and the daemon hasn't added them before. Its last part is the
+// People from tags (DESIGN.md, F12): a hand-made `People/…` tag adds its person to the photo, as a small square face
+// in its centre, where the person has no face in any copy and the daemon hasn't added them before. Its last part is the
 // person's name, as F10 writes it: a "/" in a name is "|" in the tag. Pure: src/sync/reconcile.ts reads the state and
 // adds the faces.
 
@@ -15,6 +15,18 @@ export function personNameOf(tag: string): string | undefined {
   if (!tag.startsWith(PEOPLE) || tag.length === PEOPLE.length) return undefined;
   const name = tag.slice(tag.lastIndexOf("/") + 1).replaceAll("|", "/").trim();
   return name === "" ? undefined : name;
+}
+
+/** The share of the photo's width a face added from a tag spans, on each side: small, so it's not in the way. */
+export const TAG_FACE_SHARE = 0.08;
+
+/**
+ * The face added from a tag: a square, `TAG_FACE_SHARE` of the photo's width on a side, in its centre, in pixels of
+ * the photo as Immich measures it (at least 1 pixel, and never more than the photo).
+ */
+export function tagFaceBox(width: number, height: number): { x: number; y: number; width: number; height: number } {
+  const side = Math.max(1, Math.min(Math.round(width * TAG_FACE_SHARE), width, height));
+  return { x: Math.round((width - side) / 2), y: Math.round((height - side) / 2), width: side, height: side };
 }
 
 /** An account's own record of a person, as F12 needs it. */

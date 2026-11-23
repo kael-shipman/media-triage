@@ -96,10 +96,18 @@ export function listUsers(admin: ImmichClient): Promise<UserAdminResponseDto[]> 
 }
 
 /** Whether Immich's library queue is idle: no scan or import running, waiting or delayed (`GET /api/queues/library`). */
-export async function libraryQueueIdle(admin: ImmichClient): Promise<boolean> {
-  const queue = await admin.call("Reading the library queue", (opts) => getQueue({ name: QueueName.Library }, opts));
-  const { active, waiting, delayed } = queue.statistics;
-  return active + waiting + delayed === 0;
+export function libraryQueueIdle(admin: ImmichClient): Promise<boolean> {
+  return queuesIdle(admin, [QueueName.Library]);
+}
+
+/** Whether each of these Immich queues is idle: nothing running, waiting or delayed (`GET /api/queues/{name}`). */
+export async function queuesIdle(admin: ImmichClient, names: readonly QueueName[]): Promise<boolean> {
+  for (const name of names) {
+    const queue = await admin.call(`Reading the ${name} queue`, (opts) => getQueue({ name }, opts));
+    const { active, waiting, delayed } = queue.statistics;
+    if (active + waiting + delayed > 0) return false;
+  }
+  return true;
 }
 
 /**

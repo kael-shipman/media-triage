@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { type NamedPerson, type PeopleFromTagsInput, personNameOf, personTagName, planPeopleFromTags } from "./people-from-tags.ts";
+import { type NamedPerson, type PeopleFromTagsInput, personNameOf, personTagName, planPeopleFromTags, tagFaceBox } from "./people-from-tags.ts";
 
 test("a People/… tag names the person in its last part, with | read as /", () => {
   expect(personNameOf("People/Robin Example")).toBe("Robin Example");
@@ -10,6 +10,14 @@ test("a People/… tag names the person in its last part, with | read as /", () 
   expect(personNameOf("Places/Lake")).toBeUndefined();
   expect(personNameOf("Title/People")).toBeUndefined();
   expect(personTagName(" AC/DC ")).toBe("AC|DC");
+});
+
+test("the face added from a tag is a square 8% of the width, in the centre, within the photo", () => {
+  expect(tagFaceBox(4000, 3000)).toEqual({ x: 1840, y: 1340, width: 320, height: 320 });
+  expect(tagFaceBox(3000, 4000)).toEqual({ x: 1380, y: 1880, width: 240, height: 240 });
+  // A panorama's height bounds it; a tiny image still gets a pixel.
+  expect(tagFaceBox(10000, 400)).toEqual({ x: 4800, y: 0, width: 400, height: 400 });
+  expect(tagFaceBox(5, 5)).toEqual({ x: 2, y: 2, width: 1, height: 1 });
 });
 
 describe("planPeopleFromTags", () => {

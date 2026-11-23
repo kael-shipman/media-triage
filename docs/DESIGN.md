@@ -448,10 +448,12 @@ If the state is lost, merge as a union, which never drops a tag, and report it.
   - **When:** the person has no face in any copy of the file (visible or not, and not deleted), and the daemon hasn't
     added them to this file before. **Once only:** a person the daemon added and someone then removed in Immich stays
     removed. The hand-made tag stays, as a plain tag (F10 never removes hand-made tags).
-  - **How:** a face added by hand (`POST /api/faces`) covering the whole photo or video, since where the person is
-    isn't known. On one copy, when the server mirrors face corrections between copies (the fork); otherwise on each
-    copy whose account names the person. From then on it's a face like any other: F10 gives it a tag and, for a photo,
-    a region, which covers the whole photo too.
+  - **How:** a face added by hand (`POST /api/faces`), since where the person is isn't known: a square 8% of the
+    photo's width on a side, in its centre (`tagFaceBox`), so it isn't in the way when the photo is hovered over (the
+    author, 2026-11-23). Immich can't move a face, so placing the person means deleting it and drawing another, which
+    the once-only rule keeps. On one copy, when the server mirrors face corrections between copies (the fork); otherwise
+    on each copy whose account names the person. From then on it's a face like any other: F10 gives it a tag and, for
+    a photo, a region of the same box.
   - **Recorded** in the unit's record: the people added to it (`tagPeople`), and that it was looked at under this rule
     (`peopleChecked`). The full pass returns units with a hand-made `People/…` tag that weren't looked at (section 3),
     so the archive is covered once the switch is on. Naming or renaming a person reconciles every unit with a tag
@@ -555,13 +557,19 @@ are in the sidecar, so they need nothing. The rest is restored once each account
 - **Faces first,** since waiting for them is what takes time: while the old copy had detected faces that have no match
   on the new copy, or a match with no person yet, it waits (`src/core/face-match.ts`, `awaitingDetection`). Then
   `faceActions`: reassign, add the hand-made faces, delete the deleted ones; a detected face with no match is
-  reported. The old copy's faces are its own account's, from the state.
+  reported. The old copy's faces are its own account's, from the state. **Immich answers 500 for the faces of a copy
+  whose metadata it hasn't read yet** (`getFacesById` looks the copy up with an inner join on its EXIF row), so that's
+  waited for too, not counted as an error (2026-11-23).
 - **Favorite, visibility and albums** from the sidecar's `mediatriage:Accounts`, each on the new copy in the account
   of that user ID. A locked visibility may need the account's PIN; if Immich refuses, it's reported.
 - **Every step looks first,** so running it again changes nothing that's already so.
 - **The old copies** must then be offline or gone (`getAsset`).
-- **Waiting is limited** to an hour after the move. Then it does what it can, and reports the rest. Either way the
-  unit is then released from the hold.
+- **Waiting is limited** to an hour after the move, and longer while Immich's queues for what it waits for (the
+  library, metadata extraction, face detection and recognition) have work, up to 24 hours. Then it does what it can,
+  and reports the rest. Either way the unit is then released from the hold. Without the admin's session the queues
+  can't be read, so the hour alone applies. Before 0.5.0 it was an hour, busy or not: on the author's server
+  (2026-11-23), Immich's machine learning timed out under the load of a night's filing, faces at the new paths weren't
+  detected within the hour, and 92 of one account's face corrections weren't put back.
 
 **Holding the unit** (decided with the author, 2026-11-04): the new copies arrive with default favorites, visibility
 and albums, and no faces until Immich detects them. Sync would record those in the sidecar over what filing is about
@@ -945,4 +953,5 @@ left here is keeping them through filing, which makes a new asset:
   (F2), and filing needs a creator (`Promote/Needs a creator`, section 7).
 - 2026-11-22 (0.4.1): an error from Immich while putting back one unit no longer ends the filing run (section 7), and
   promoted units waiting to be filed say why in the log, once per reason.
-- 2026-11-22 (0.5.0): F12, people from tags, and `media-triage rename-tag`.
+- 2026-11-22 (0.5.0): F12, people from tags, and `media-triage rename-tag`. Putting back after filing waits for a
+  copy Immich hasn't read the metadata of, and while Immich is busy (section 7).

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { FIXTURES, USERS, api, configFor, describeImmich, immichIdle, login, mediaFolder, newUser, waitFor } from "../../test/immich/harness.ts";
 import { PathMap } from "../core/path-map.ts";
+import { tagFaceBox } from "../core/people-from-tags.ts";
 import { type AccountState, type XmpFields, darktableReads } from "../core/xmp.ts";
 import { fileBatch } from "../filing/file.ts";
 import { restorePending } from "../filing/restore.ts";
@@ -292,7 +293,7 @@ describeImmich("reconciling a unit with two accounts' copies", () => {
     expect(fields.regions).toBeUndefined();
   }, 180_000);
 
-  test("a hand-made People tag adds its person, once named, as a face on the whole photo; removed, they stay removed (F12)", async () => {
+  test("a hand-made People tag adds its person, once named, as a small face in the centre; removed, they stay removed (F12)", async () => {
     const { accounts, unit, store, map, ctx, copy, read, token } = await twoAccounts("people-from-tags");
     ctx.config.immich.peopleFromTags = true;
     const sync = async () => {
@@ -310,7 +311,8 @@ describeImmich("reconciling a unit with two accounts' copies", () => {
     expect(await facesOf()).toEqual([]);
     expect(store.unit(unit)?.synced.peopleChecked).toBe(true);
 
-    // Account one names someone Robin Example: the photo tagged with them gets them, as a face covering it all. Account
+    // Account one names someone Robin Example: the photo tagged with them gets them, as a small square face in the
+    // centre. Account
     // two names no one so, and the server doesn't mirror faces, so its copy gets none.
     const person = await api<{ id: string }>("POST", "/people", { token: oneToken, body: { name: "Robin Example" } });
     const [face] = await syncUntil("Robin added from the tag", async () => {
@@ -318,7 +320,8 @@ describeImmich("reconciling a unit with two accounts' copies", () => {
       return faces.length > 0 ? faces : undefined;
     });
     const asset = await read("one");
-    expect(face).toMatchObject({ person: { id: person.id }, boundingBoxX1: 0, boundingBoxY1: 0, boundingBoxX2: asset.width!, boundingBoxY2: asset.height! });
+    const box = tagFaceBox(asset.width!, asset.height!);
+    expect(face).toMatchObject({ person: { id: person.id }, boundingBoxX1: box.x, boundingBoxY1: box.y, boundingBoxX2: box.x + box.width, boundingBoxY2: box.y + box.height });
     expect(store.unit(unit)?.synced.tagPeople).toEqual([person.id]);
     const twoFaces = await api<unknown[]>("GET", `/faces?id=${copy("two").id}`, { token: await token("two") });
     expect(twoFaces).toEqual([]);
