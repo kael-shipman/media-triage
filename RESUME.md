@@ -338,6 +338,14 @@ person named after the tag reaches the photo, the face covers it, the other acco
 no person of that name) gets none, and a removed person isn't added again. All 515 tests passed twice in a row
 against the development Immich, and the smoke test (27 of 27).
 
+**On the author's server** (2026-11-24): dry-run over a copy of the state (985 people, no sidecar writes, no new
+conflicts), then live; `rename-tag` renamed two old names in 2,061 and 1,415 sidecars, and the daemon carried them to
+Immich with no errors; 1,834 people added. **Then F12 was turned off again:** every face from a tag is the same
+centred box, so on a photo tagged with two people the author's fork, which pairs faces between copies by box overlap
+(IoU ≥ 0.9), took the two for one face, and its mirroring reassigned one person's face to the other instead of copying
+it (about 155 photos). **Next:** give each person added from tags on a photo a distinct box (a row through the centre,
+skipping slots that overlap existing faces), then repair the photos with two or more, with the author.
+
 ## Next: running it for real
 
 The code is done. What's left is outside this repository. Every write to real files needs the author; the F1
