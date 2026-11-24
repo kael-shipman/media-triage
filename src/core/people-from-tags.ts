@@ -1,7 +1,9 @@
 // People from tags (DESIGN.md, F12): a hand-made `People/…` tag adds its person to the photo, as a small square face
-// in its centre, where the person has no face in any copy and the daemon hasn't added them before. Its last part is the
+// near its centre, where the person has no face in any copy and the daemon hasn't added them before. Its last part is the
 // person's name, as F10 writes it: a "/" in a name is "|" in the tag. Pure: src/sync/reconcile.ts reads the state and
 // adds the faces.
+
+import type { FaceBox } from "./regions.ts";
 
 const PEOPLE = "People/";
 
@@ -20,13 +22,60 @@ export function personNameOf(tag: string): string | undefined {
 /** The share of the photo's width a face added from a tag spans, on each side: small, so it's not in the way. */
 export const TAG_FACE_SHARE = 0.08;
 
+/** A box in pixels of an image `width` by `height`, as `POST /api/faces` takes it. */
+export interface PixelBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** A box as fractions of its image, so boxes measured on images of different sizes compare. */
+function fractions(box: FaceBox): { x1: number; y1: number; x2: number; y2: number } {
+  return {
+    x1: box.boundingBoxX1 / box.imageWidth,
+    y1: box.boundingBoxY1 / box.imageHeight,
+    x2: box.boundingBoxX2 / box.imageWidth,
+    y2: box.boundingBoxY2 / box.imageHeight,
+  };
+}
+
+/** 0, 1, -1, 2, -2, …, up to `limit` either way. */
+function outwards(limit: number): number[] {
+  const steps = [0];
+  for (let step = 1; step <= limit; step++) steps.push(step, -step);
+  return steps;
+}
+
 /**
- * The face added from a tag: a square, `TAG_FACE_SHARE` of the photo's width on a side, in its centre, in pixels of
- * the photo as Immich measures it (at least 1 pixel, and never more than the photo).
+ * The face added from a tag: a square, `TAG_FACE_SHARE` of the photo's width on a side, in pixels of the photo as
+ * Immich measures it (at least 1 pixel, and never more than the photo). In the centre, or, where that overlaps a face
+ * already there (`occupied`, any copy's, measured on any size of the image), the nearest free place in a row through
+ * the centre, then in rows above and below, half a side apart. Each person needs a box of their own: the author's
+ * Immich fork pairs faces between copies of a file by their boxes, so two people with one box are one face to it.
  */
-export function tagFaceBox(width: number, height: number): { x: number; y: number; width: number; height: number } {
+export function tagFaceBox(width: number, height: number, occupied: readonly FaceBox[] = []): PixelBox {
   const side = Math.max(1, Math.min(Math.round(width * TAG_FACE_SHARE), width, height));
-  return { x: Math.round((width - side) / 2), y: Math.round((height - side) / 2), width: side, height: side };
+  const step = Math.max(1, Math.round(side * 1.5));
+  const [centreX, centreY] = [Math.round((width - side) / 2), Math.round((height - side) / 2)];
+  const taken = occupied.filter((face) => face.imageWidth > 0 && face.imageHeight > 0).map(fractions);
+  const free = (x: number, y: number) =>
+    taken.every((box) => x / width >= box.x2 || (x + side) / width <= box.x1 || y / height >= box.y2 || (y + side) / height <= box.y1);
+  for (const row of outwards(Math.floor(height / step))) {
+    const y = centreY + row * step;
+    if (y < 0 || y + side > height) continue;
+    for (const column of outwards(Math.floor(width / step))) {
+      const x = centreX + column * step;
+      if (x < 0 || x + side > width) continue;
+      if (free(x, y)) return { x, y, width: side, height: side };
+    }
+  }
+  return { x: centreX, y: centreY, width: side, height: side };
+}
+
+/** A box `POST /api/faces` took, as Immich then reports it: for `occupied`, within one pass. */
+export function asFaceBox(box: PixelBox, width: number, height: number): FaceBox {
+  return { boundingBoxX1: box.x, boundingBoxY1: box.y, boundingBoxX2: box.x + box.width, boundingBoxY2: box.y + box.height, imageWidth: width, imageHeight: height };
 }
 
 /** An account's own record of a person, as F12 needs it. */

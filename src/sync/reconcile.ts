@@ -18,7 +18,8 @@ import type { Config } from "../config.ts";
 import { type FacesOutcome, type NamedFace, applyFaces } from "../core/faces.ts";
 import { readiness, withInbox, withNeeds } from "../core/filing.ts";
 import { type Base, type Side, type SideValues, mergeUnit, normalizeDescription, normalizeRating } from "../core/merge.ts";
-import { planPeopleFromTags, tagFaceBox } from "../core/people-from-tags.ts";
+import { asFaceBox, planPeopleFromTags, tagFaceBox } from "../core/people-from-tags.ts";
+import type { FaceBox } from "../core/regions.ts";
 import { isDarktableInternalInImmich, sameTags } from "../core/tags.ts";
 import { CREATOR, TITLE } from "../core/titles.ts";
 import { PROMOTE_TAG } from "../core/naming.ts";
@@ -529,11 +530,14 @@ async function reconcileUnit(
     if (!merged.trashed && copy.asset.isTrashed) tell.restore(copy);
   }
 
-  // F12: people tagged by hand and not on the file are added to it, once, as a small face in the centre.
+  // F12: people tagged by hand and not on the file are added to it, once, as a small face near the centre, each in a
+  // place of their own: clear of the faces already on any copy, and of those added in this pass.
   const tagPeople = new Set(previous?.synced.tagPeople ?? []);
   let peopleChecked = previous?.synced.peopleChecked;
   if (ctx.config.immich.peopleFromTags && fields && !held) {
-    const present = new Set(allRecords.flatMap((record) => store.facesOn(record.id).flatMap((face) => (face.person !== null && face.deleted === null ? [face.person] : []))));
+    const onFile = allRecords.flatMap((record) => store.facesOn(record.id).filter((face) => face.deleted === null));
+    const present = new Set(onFile.flatMap((face) => (face.person !== null ? [face.person] : [])));
+    const occupied: FaceBox[] = [...onFile];
     const plan = planPeopleFromTags({
       tags: merged.tags,
       made: faces?.madeTags ?? previous?.synced.people ?? [],
@@ -556,7 +560,9 @@ async function reconcileUnit(
       report.peopleAdded.push({ unit, name: face.name });
       if (dryRun) continue;
       try {
-        await createFace(copy.account.client, { assetId: face.asset, personId: face.person, imageWidth: width, imageHeight: height, ...tagFaceBox(width, height) });
+        const box = tagFaceBox(width, height, occupied);
+        await createFace(copy.account.client, { assetId: face.asset, personId: face.person, imageWidth: width, imageHeight: height, ...box });
+        occupied.push(asFaceBox(box, width, height));
         tagPeople.add(face.person);
       } catch (error) {
         log.warn("couldn't add a person from a tag; tried again with the unit", { unit, person: face.name, error: (error as Error).message });

@@ -335,6 +335,29 @@ describeImmich("reconciling a unit with two accounts' copies", () => {
     expect((await readSidecar(exiftool, `${unit}.xmp`))!.fields.hierarchicalSubject).toContain("People|Robin Example");
   }, 180_000);
 
+  test("two people from tags on one photo get boxes of their own, which don't overlap (F12)", async () => {
+    const { accounts, unit, store, map, ctx, copy, token } = await twoAccounts("people-from-tags-two");
+    ctx.config.immich.peopleFromTags = true;
+    const sync = async () => {
+      for (const account of accounts) await consumeStream(account, store, map, { act: async (units) => void (await reconcile(ctx, units)) });
+    };
+    // A second hand-made tag beside the fixture's People|Robin Example, and both named in account one.
+    const sidecar = (await readSidecar(exiftool, `${unit}.xmp`))!;
+    await writeSidecar(exiftool, sidecar, { tags: [...darktableReads(sidecar.fields).tags, "People/Family/Kit Example"] });
+    const oneToken = await token("one");
+    for (const name of ["Robin Example", "Kit Example"]) await api("POST", "/people", { token: oneToken, body: { name } });
+    type Face = { person: { name: string } | null; boundingBoxX1: number; boundingBoxY1: number; boundingBoxX2: number; boundingBoxY2: number };
+    const faces = await waitFor("both people added from their tags", async () => {
+      await sync();
+      const found = (await api<Face[]>("GET", `/faces?id=${copy("one").id}`, { token: oneToken })).filter((face) => face.person !== null);
+      return found.length === 2 ? found : undefined;
+    }, 60_000);
+    expect(faces.map((face) => face.person!.name).sort()).toEqual(["Kit Example", "Robin Example"]);
+    const [a, b] = faces as [Face, Face];
+    const apart = a.boundingBoxX2 <= b.boundingBoxX1 || b.boundingBoxX2 <= a.boundingBoxX1 || a.boundingBoxY2 <= b.boundingBoxY1 || b.boundingBoxY2 <= a.boundingBoxY1;
+    expect(apart).toBe(true);
+  }, 180_000);
+
   test("an inbox unit tagged Promote is ready once every copy has read the sidecar; without a title it needs one", async () => {
     const { unit, ctx, settled } = await twoAccounts("ready", { inbox: true });
     const tagsOf = (asset: Asset) => (asset.tags ?? []).map((tag) => tag.value).sort();

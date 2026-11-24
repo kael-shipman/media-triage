@@ -8,7 +8,8 @@ you're about to build would change it, ask the author first.
 session stops partway. Each step ends with tests passing, the type check clean, a commit and a push; CI must stay
 green.
 
-**Last updated:** 2026-11-22 (`v0.5.0`: people from tags, F12, and `rename-tag`, "People from tags" below).
+**Last updated:** 2026-11-24 (`v0.5.1`: each person from tags gets a box of their own, "People from tags" below).
+2026-11-22: `v0.5.0`, people from tags, F12, and `rename-tag`.
 2026-11-22: `v0.4.1`, a put-back error no longer stops filing, "One unit's put-back error" below.
 2026-11-21: `v0.4.0`, the creator as the tag `Creator/<creator>`, "The creator's tag" below.
 2026-11-20: milestones 9 and 10, edits, planned (DESIGN.md section 14; not started). 2026-11-14: `v0.3.0`, the
@@ -23,7 +24,7 @@ run", below). `v0.1.1`'s dry run there was good, and **it's been live on the aut
 ## Working on it
 
 - **Bun 1.4** runs and builds it. Without Bun installed, `npx --yes bun@1.4.4` stands in for `bun`:
-  - `bun test`: the unit tests (453; 451 in CI, which skips the two that need Darktable), and the integration tests,
+  - `bun test`: the unit tests (455; 453 in CI, which skips the two that need Darktable), and the integration tests,
     skipped;
   - `bun run typecheck`: TypeScript, over `src/`, `scripts/` and `test/`;
   - `bun run build [version]`: executables for linux-x64 and linux-arm64 in `dist/` (`TARGETS=linux-x64` for one).
@@ -31,7 +32,7 @@ run", below). `v0.1.1`'s dry run there was good, and **it's been live on the aut
   `127.0.0.1:2284`, with made-up users (`alex@example.com`, the admin, and `sam@example.com`).
   - `bun run immich up` starts it (about a minute) and `bun run immich down` deletes everything. Leave it down when
     you stop: its database is in memory anyway.
-  - `MEDIA_TRIAGE_IMMICH_TESTS=1 bun test` runs everything against it (515 tests). Run it twice in a row on one
+  - `MEDIA_TRIAGE_IMMICH_TESTS=1 bun test` runs everything against it (518 tests). Run it twice in a row on one
     instance before calling a step done: tests must not depend on what other tests left behind.
   - `bun test/immich/smoke.ts` is the daemon's smoke test (about 5 minutes): it runs `media-triage run` itself, with
     two fresh accounts, and checks that it files a batch end to end (the file's header says what it does). Run it
@@ -50,7 +51,7 @@ run", below). `v0.1.1`'s dry run there was good, and **it's been live on the aut
 - **Immich's source**, for checking behavior: the fork's clone at `~/Desktop/tmp-repos/immich`, branch `twins`, based
   on v3.3.5. Look in `server/src`: `controllers/`, `dtos/`, `services/`, `repositories/`. Use Immich only through
   its API, never its database.
-- **Releases:** `v0.5.0` (2026-11-22, people from tags and `rename-tag`), `v0.4.1` (2026-11-22, put-back errors contained), `v0.4.0` (2026-11-21, the creator's tag), `v0.3.0` (2026-11-14, the `Inbox` tag), `v0.2.0` (2026-11-11, filing at a set time), `v0.1.3` (2026-11-09, the refresh loop), `v0.1.2` (2026-11-08, duplicates filed, the watcher's names), `v0.1.1` (2026-11-07, the fixes from the
+- **Releases:** `v0.5.1` (2026-11-24, a box of their own for each person from tags), `v0.5.0` (2026-11-22, people from tags and `rename-tag`), `v0.4.1` (2026-11-22, put-back errors contained), `v0.4.0` (2026-11-21, the creator's tag), `v0.3.0` (2026-11-14, the `Inbox` tag), `v0.2.0` (2026-11-11, filing at a set time), `v0.1.3` (2026-11-09, the refresh loop), `v0.1.2` (2026-11-08, duplicates filed, the watcher's names), `v0.1.1` (2026-11-07, the fixes from the
   first dry run on the author's archive), `v0.1.0`
   (2026-11-07, everything through milestone 8 and the fixes of 2026-11-05), and the
   pre-releases `v0.1.0-rc.1` and `rc.2`, from milestone 1 only. Pushing a tag `vX.Y.Z` publishes a release
@@ -343,8 +344,12 @@ conflicts), then live; `rename-tag` renamed two old names in 2,061 and 1,415 sid
 Immich with no errors; 1,834 people added. **Then F12 was turned off again:** every face from a tag is the same
 centred box, so on a photo tagged with two people the author's fork, which pairs faces between copies by box overlap
 (IoU ≥ 0.9), took the two for one face, and its mirroring reassigned one person's face to the other instead of copying
-it (about 155 photos). **Next:** give each person added from tags on a photo a distinct box (a row through the centre,
-skipping slots that overlap existing faces), then repair the photos with two or more, with the author.
+it (about 155 photos). **Fixed in 0.5.1** (2026-11-24): `tagFaceBox` takes the faces already on the file and those added
+in the same pass, and gives each person the centre or the nearest free place in a row through it, half a side apart,
+then rows above and below (`people-from-tags.test.ts`; end to end, "two people from tags on one photo get boxes of
+their own…"). The author's 202 affected photos were repaired outside the daemon, with a script kept in their project,
+and checked: every person once on every copy, no two manual faces sharing a box. All 518 tests passed twice in a row
+against the development Immich, and the smoke test (27 of 27).
 
 ## Next: running it for real
 

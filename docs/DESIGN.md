@@ -450,7 +450,11 @@ If the state is lost, merge as a union, which never drops a tag, and report it.
     removed. The hand-made tag stays, as a plain tag (F10 never removes hand-made tags).
   - **How:** a face added by hand (`POST /api/faces`), since where the person is isn't known: a square 8% of the
     photo's width on a side, in its centre (`tagFaceBox`), so it isn't in the way when the photo is hovered over (the
-    author, 2026-11-23). Immich can't move a face, so placing the person means deleting it and drawing another, which
+    author, 2026-11-23). **Each person gets a place of their own:** where the centre overlaps a face already on any copy,
+    or one added in the same pass, the nearest free place in a row through the centre, half a side apart, then in rows
+    above and below. The author's fork pairs faces between copies by their boxes (IoU ≥ 0.9), so two people with one
+    box are one face to it: in 0.5.0 they all had the centre, and mirroring reassigned one person's face to the other
+    on about 155 photos tagged with two or more (2026-11-24). Immich can't move a face, so placing the person means deleting it and drawing another, which
     the once-only rule keeps. On one copy, when the server mirrors face corrections between copies (the fork); otherwise
     on each copy whose account names the person. From then on it's a face like any other: F10 gives it a tag and, for
     a photo, a region of the same box.
@@ -955,3 +959,4 @@ left here is keeping them through filing, which makes a new asset:
   promoted units waiting to be filed say why in the log, once per reason.
 - 2026-11-22 (0.5.0): F12, people from tags, and `media-triage rename-tag`. Putting back after filing waits for a
   copy Immich hasn't read the metadata of, and while Immich is busy (section 7).
+- 2026-11-24 (0.5.1): F12 gives each person on a photo a box of their own (section 6).
